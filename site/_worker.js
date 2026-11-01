@@ -196,6 +196,7 @@ const SHELVES = [["Trending Now", "trending", ""], ["Trending Bollywood", "pl", 
 // and none of these values are ever sent to the browser.
 let TG_TOKEN = "", TG_GROUP = 0, TG_ADMIN = 0, TG_BOT = "", HOOK_SECRET = "", SITE = "/", TG = "", TG_FILE = "";
 function loadConfig(env, req) {
+  SUPPORT_TG = String(env.SUPPORT_TG || "Memer_guru").replace(/^@/, "");
   TG_TOKEN = String(env.BOT_TOKEN || "");
   TG_GROUP = Number(env.STORAGE_CHAT_ID || 0);
   TG_ADMIN = Number(env.ADMIN_ID || 0);
@@ -302,10 +303,35 @@ async function userOf(d, code, ctx) {
   if (u && u.chat_id && u.linked && (!u.seen || Date.now() - u.seen > 600e3)) { const w = d.prepare("UPDATE people SET last_seen = ? WHERE chat_id = ?").bind(Date.now(), u.chat_id).run().catch(() => {}); if (ctx) ctx.waitUntil(w); else await w; }
   return u;
 }
+// ---------- Telegram display names (first name + @username), cached per user; refreshed from each bot message and, for users stored before names were kept, from getChat (server-side only) ----------
+async function nameGet(d, chatId) { try { const r = await d.prepare("SELECT v FROM kv WHERE k = ?").bind("tgn:" + chatId).first(); return r ? JSON.parse(r.v) : null; } catch (e) { return null; } }
+async function namePut(d, chatId, f) {
+  const n = { first: String(f.first_name || "").slice(0, 60), last: String(f.last_name || "").slice(0, 60), username: String(f.username || ""), at: Date.now() };
+  const full = [n.first, n.last].filter(Boolean).join(" ").slice(0, 60);
+  await d.batch([
+    d.prepare("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind("tgn:" + chatId, JSON.stringify(n)),
+    d.prepare("UPDATE users SET username = ?, name = ? WHERE chat_id = ?").bind(n.username, full, chatId),
+    d.prepare("UPDATE people SET username = ?, name = ? WHERE chat_id = ?").bind(n.username, full, chatId),
+  ]);
+  return n;
+}
+async function nameFetch(d, chatId) {
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 3500);
+  try { const r = await fetch(TG + "getChat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ chat_id: chatId }), signal: ac.signal }); const j = await r.json(); if (!j.ok || !j.result) return null; return await namePut(d, chatId, j.result); }
+  catch (e) { return null; } finally { clearTimeout(t); }
+}
+async function nameOf(d, u, ctx) { // -> { first, username } for a linked user
+  if (!u || !u.chat_id || !u.linked) return null;
+  let n = await nameGet(d, u.chat_id);
+  if (!n) n = await nameFetch(d, u.chat_id); // backfill once, inline, for users stored before names were kept
+  else if (Date.now() - (n.at || 0) > 12 * 3600e3 && ctx) ctx.waitUntil(nameFetch(d, u.chat_id)); // keep it fresh in the background
+  return n || { first: String(u.name || "").split(/\s+/)[0], username: u.username || "" };
+}
 async function personSeen(d, from, connected) {
   if (!from || !from.id || from.id < 0) return;
   const name = [from.first_name, from.last_name].filter(Boolean).join(" ").slice(0, 60), now = Date.now();
   const was = await d.prepare("SELECT connected, blocked FROM people WHERE chat_id = ?").bind(from.id).first();
+  if (from.first_name || from.username) await d.prepare("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind("tgn:" + from.id, JSON.stringify({ first: String(from.first_name || "").slice(0, 60), last: String(from.last_name || "").slice(0, 60), username: String(from.username || ""), at: now })).run().catch(() => {});
   await d.prepare("INSERT INTO people (chat_id, username, name, first_at, last_seen, blocked, connected) VALUES (?, ?, ?, ?, ?, 0, ?) ON CONFLICT(chat_id) DO UPDATE SET username = excluded.username, name = excluded.name, last_seen = excluded.last_seen, blocked = 0, connected = MAX(people.connected, excluded.connected)").bind(from.id, from.username || "", name, now, now, connected ? 1 : 0).run();
   return { isNew: !was, wasConnected: !!(was && was.connected), wasBlocked: !!(was && was.blocked) };
 }
@@ -586,7 +612,12 @@ async function runBroadcast(env, ctx, bid) {
 async function resumeBroadcast(env, ctx) {
   try { const d = await db(env); const b = await d.prepare("SELECT id FROM bcast WHERE status = 'running' AND lease < ? LIMIT 1").bind(Date.now()).first(); if (b) ctx.waitUntil(runBroadcast(env, ctx, b.id)); } catch (e) {}
 }
-const WELCOME = n => `Namaste${n ? " " + n : ""}! 🎶 Dhun connected ✅\n\nAb app me jo bhi song Download karoge, wo yahin is chat me aa jayega. Phone storage use nahi hoga, Telegram me safe rahega.\nAapke liked songs, playlists aur history bhi aapke account me save rahenge, kisi bhi phone pe connect karo, sab wapas aa jayega.\n\nApp: ${SITE}`;
+const APK_PATH = "dhun.apk";
+let SUPPORT_TG = "Memer_guru"; // Telegram handle shown as support contact in bot messages (env SUPPORT_TG)
+const LINKS = site => `🌐 Web app (iPhone / any phone): ${site}\n📱 Android app (offline download bhi): ${site}${APK_PATH}\n\n💬 Support: @${SUPPORT_TG}`;
+const LINK_BTNS = site => ({ parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "🌐 Open Dhun", url: site }, { text: "📱 Android App", url: site + APK_PATH }]] } });
+const WELCOME = (n, site = SITE) => `Namaste..! 🎶 <b>Dhun connected</b> ✅\n\nAb app me jo bhi song <b>Download</b> karoge, wo yahin is chat me aa jayega. Phone storage use nahi hoga, Telegram me safe rahega.\n\nAapke liked songs, playlists aur history bhi aapke account me save rahenge — kisi bhi phone pe connect karo, sab wapas aa jayega.\n\n${LINKS(site)}`;
+const HELLO = (site = SITE) => `Namaste..! 🎶 Main <b>Dhun</b> ka bot hoon.\n\nSongs yahan paane ke liye Dhun app kholo → Library → "Connect Telegram".\n\n${LINKS(site)}`;
 async function tgHook(env, req, ctx) {
   if (!HOOK_SECRET || req.headers.get("x-telegram-bot-api-secret-token") !== HOOK_SECRET) return new Response("no", { status: 403 });
   const dry = HOOK_SECRET && req.headers.get("x-dhun-dry") === HOOK_SECRET ? [] : null; // test mode: replies come back in the response instead of being sent
@@ -610,7 +641,7 @@ async function tgHook(env, req, ctx) {
     await d.prepare("UPDATE users SET chat_id = ?, username = ?, name = ?, linked = ? WHERE code = ?").bind(m.chat.id, from.username || "", name, Date.now(), st[1]).run();
     const ps = await personSeen(d, { ...from, id: m.chat.id }, true);
     if (ps && ps.isNew) logNewUser(env, lctx, { ...from, id: m.chat.id }, "app se 🔗 Connect Telegram");
-    await say(WELCOME(from.first_name || "")); return done();
+    await say(WELCOME(from.first_name || ""), LINK_BTNS(SITE)); return done();
   }
   const ps = await personSeen(d, { ...from, id: m.chat.id }, false).catch(() => null);
   if (ps && ps.isNew) logNewUser(env, lctx, { ...from, id: m.chat.id }, /^\/start/.test(text) ? "bot me ▶️ /start" : "bot me pehla message");
@@ -623,7 +654,7 @@ async function tgHook(env, req, ctx) {
     const act = (method, body) => dry ? (dry.push({ method, ...body }), Promise.resolve({})) : tg(method, body).catch(() => ({}));
     if (await previewBcast(d, m, act)) return done();
     await say("Ye message sab users ko bhejna hai? Isi message ko reply karke /broadcast likho, ya /admin → 📢 Broadcast. Saare commands: /help"); return done(); }
-  if (/^\/start/.test(text) || /^\/help/i.test(text)) await say(`Namaste! 🎶 Main Dhun ka bot hoon.\nSongs yahan paane ke liye Dhun app kholo → Library → "Connect Telegram".\n${SITE}`);
+  if (/^\/start/.test(text) || /^\/help/i.test(text)) await say(HELLO(SITE), LINK_BTNS(SITE));
   else await say(`Songs download karne ke liye Dhun app use karo: ${SITE}`);
   return done();
 }
@@ -648,7 +679,8 @@ async function userData(env, ctx, body) {
     const r2 = await d.prepare("SELECT rev FROM udata WHERE chat_id = ?").bind(u.chat_id).first(); cur.rev = r2 ? r2.rev : cur.rev;
     return J({ ok: true, rev: cur.rev, at: cur.at });
   }
-  return J({ ok: true, ...cur, username: u.username || "", name: u.name || "" });
+  const n = await nameOf(d, u, ctx);
+  return J({ ok: true, ...cur, username: n ? n.username : (u.username || ""), name: u.name || "", first: n?.first || "", uid: String(u.chat_id) });
 }
 async function tgRoute(p, req, env, u, ctx) {
   if (p === "/api/tg/hook") return tgHook(env, req, ctx);
@@ -672,7 +704,7 @@ async function tgRoute(p, req, env, u, ctx) {
     await d.prepare("INSERT INTO users (code, created) VALUES (?, ?)").bind(c, Date.now()).run();
     return J({ code: c, link: `https://t.me/${TG_BOT}?start=${c}`, bot: TG_BOT });
   }
-  if (p === "/api/tg/me") { const x = await userOf(d, code, ctx); return J({ linked: !!(x && x.chat_id && x.linked), username: x?.username || "", name: x?.name || "", bot: TG_BOT, known: !!x }); }
+  if (p === "/api/tg/me") { const x = await userOf(d, code, ctx); const n = await nameOf(d, x, ctx); return J({ linked: !!(x && x.chat_id && x.linked), username: n ? n.username : (x?.username || ""), name: n ? [n.first, n.last].filter(Boolean).join(" ") : (x?.name || ""), first: n?.first || "", uid: x && x.linked && x.chat_id ? String(x.chat_id) : "", bot: TG_BOT, known: !!x }); }
   if (p === "/api/u/data" && req.method === "POST") return userData(env, ctx, body);
   if (p === "/api/tg/dl" && req.method === "POST") return tgDl(env, body);
   if (p === "/api/tg/mine") { const x = await userOf(d, code, ctx); if (!x || !x.chat_id) return J({ items: [], linked: false }); const rs = await d.prepare("SELECT * FROM dls WHERE chat_id = ? ORDER BY at DESC").bind(x.chat_id).all(); return J({ items: (rs.results || []).map(dlOut), linked: !!x.linked }); }
@@ -694,6 +726,11 @@ export default {
     const u = new URL(req.url), p = u.pathname, q = (u.searchParams.get("q") || "").slice(0, 200), v = u.searchParams.get("v") || "", id = u.searchParams.get("id") || "";
     try {
       if (p.startsWith("/api/tg/") || p.startsWith("/api/u/")) return await tgRoute(p, req, env, u, ctx);
+      if (p === "/api/app-version") { // Android in-app updater; values live in /app-version.json (edit that file + swap /dhun.apk to ship a new version)
+        let v = {}; try { const r = await env.ASSETS.fetch(new Request(new URL("/app-version.json", u), { headers: { "cache-control": "no-cache" } })); v = await r.json(); } catch (e) {}
+        return new Response(JSON.stringify({ versionCode: Number(v.versionCode) || 0, versionName: String(v.versionName || ""), apkUrl: String(v.apkUrl || SITE + "dhun.apk"), notes: String(v.notes || ""), force: !!v.force, sha256: v.sha256 || "", bytes: v.bytes || 0 }), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache, no-store, must-revalidate", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS" } });
+      }
+      if (p === "/dhun.apk") { const r = await env.ASSETS.fetch(new Request(new URL("/files/dhun-app.apk", u), req)); const h = new Headers(r.headers); h.set("content-type", "application/vnd.android.package-archive"); h.set("content-disposition", 'attachment; filename="Dhun.apk"'); h.set("cache-control", "no-cache"); h.set("access-control-allow-origin", "*"); return new Response(r.body, { status: r.status, headers: h }); }
       if (p === "/api/search") {
         if (!q) return J({ items: [] });
         const kind = u.searchParams.get("kind") || "songs";

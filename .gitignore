@@ -6,3 +6,7 @@
 node_modules/
 .DS_Store
 *.log
+
+# APK binaries come from GitHub Releases, never committed
+site/files/*.apk
+*.apk

@@ -50,6 +50,7 @@ No secrets are stored in this repo. The server reads them from environment varia
 | `BOT_USERNAME` | bot username without `@` |
 | `PUBLIC_URL` | public https address of the server, with trailing slash |
 | `LOG_CHANNEL_ID` | optional: id of a Telegram channel/group for new-user logs, e.g. `-1001234567890` (bot must be admin with permission to post). Leave empty to turn logging off |
+| `SUPPORT_TG` | optional: Telegram handle (without `@`) shown as "💬 Support" in the bot's welcome / connected messages. Default `Memer_guru` |
 
 The server also needs a SQLite-style database bound as `DB` (Cloudflare D1) and the static files bound as `ASSETS`.
 
@@ -96,6 +97,18 @@ Hinglish: iPhone pe naya icon dekhne ke liye home screen se Dhun hata do, phir S
 Dhun ek free music app hai jo browser me chalta hai aur phone ki home screen pe app ki tarah add ho jata hai. JioSaavn se gaane search aur play hote hain (320 kbps tak), queue, EQ, quality settings sab hai. Download dabane pe gaana phone storage me nahi, user ke apne Telegram bot chat me aata hai. Har user ka apna account hai (Telegram se login), aur admin bot me `/admin` likh ke stats, users aur broadcast buttons se chala sakta hai. `LOG_CHANNEL_ID` set karo to har naye user ka log ek Telegram channel me aata hai.
 
 Dhyan rahe: GitHub Pages pe sirf app ki screens chalengi. Gaane, Telegram aur accounts ke liye server (`_worker.js`) chahiye, jo Cloudflare Workers (free plan) pe chal sakta hai. Bot token aur baaki secrets kabhi repo me mat daalna, unhe server ke environment variables / secrets me rakho (`.env.example` dekho).
+
+## 🔄 Android in-app update (`/api/app-version`)
+
+The Android app asks the server whether a newer APK exists:
+
+- `GET /api/app-version` → `{ versionCode, versionName, apkUrl, notes, force, sha256, bytes }` (CORS open, never cached).
+- The values come from **`site/app-version.json`** — edit that one file to announce a new version (`versionCode` must be higher than the installed app's).
+- `GET /dhun.apk` serves the APK file from **`site/files/dhun-app.apk`** with the Android install content type. The APK binary is **not committed** (it is in `.gitignore`); download it from this repo's **Releases** and put it at `site/files/dhun-app.apk` before deploying. If `apkUrl` is empty, the server uses `PUBLIC_URL` + `dhun.apk`.
+
+Naya version ship karna: Releases se APK lo → `site/files/dhun-app.apk` me rakho → `site/app-version.json` me `versionCode`/`versionName`/`sha256`/`bytes` badlo → deploy. Purane app me "update available" aa jayega.
+
+The bot's welcome (`/start`) and "connected" messages include the web link and the Android link (`PUBLIC_URL` + `dhun.apk`) with two buttons: 🌐 Open Dhun / 📱 Android App.
 
 ## 📱 Android app (offline)
 
