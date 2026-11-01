@@ -1,10 +1,10 @@
 {
-  "versionCode": 9,
-  "versionName": "1.0.9",
+  "versionCode": 10,
+  "versionName": "1.0.10",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Naya Comic font ✨",
+  "notes": "Spotify/Apple Music playlist import 🎶",
   "force": false,
-  "size": 4853593,
-  "bytes": 4853593,
-  "sha256": "0beb6456132f107856ee4c2eb4dbe3e31d6cb332ba773665f6054913f75ad7ba"
+  "size": 4862525,
+  "bytes": 4862525,
+  "sha256": "4c0b4cc1319b569babcbe7c03384dcedfb0f82c8ddeb1e7785375e2dfb89b069"
 }
