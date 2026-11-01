@@ -213,7 +213,20 @@ h1.hrow{display:flex;align-items:center;justify-content:space-between}
 .dlm + .dlm{margin-left:2px}
 .dlm.tg svg{fill:#2aabee}
 
-.dFoot{text-align:center;color:var(--sub);font-size:12.5px;line-height:1.6;padding:28px 24px 8px}
-.dFoot img{display:block;margin:0 auto 8px;opacity:.85;width:28px;height:auto}
-.dFoot a{color:#9a8cff;text-decoration:none;font-weight:600}
+.dFoot{text-align:center;color:var(--sub);font-size:13px;line-height:1.5;padding:30px 24px 10px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.dFoot img{display:block;margin:0 auto 6px;opacity:.85;width:26px;height:auto}
+.dfT{color:#c7c7cc;font-size:14px}
+.dfSig{font-style:italic;font-weight:600;font-size:19px;letter-spacing:.5px;background:linear-gradient(90deg,#b9a8ff,#fa2d48);-webkit-background-clip:text;background-clip:text;color:transparent;font-family:Georgia,"Times New Roman",serif;margin:2px 0 8px}
+.dfBtn{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border-radius:999px;background:#2c2c2e;color:#fff;text-decoration:none;font-size:13px;font-weight:600}
+.dfBtn svg{width:14px;height:14px;fill:#2aabee}
 .acct b .sub{font-weight:400;font-size:12px;color:var(--sub)}
+#updDlg{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:24px}
+.updCard{background:#1c1c1e;border-radius:18px;padding:22px 20px 16px;width:100%;max-width:340px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.updCard img{display:block;margin:0 auto 8px;height:auto}
+.updCard h3{margin:0 0 4px;font-size:19px}
+.updVer{color:#b9a8ff;font-weight:600;font-size:14px;margin-bottom:10px}.updVer span{color:var(--sub);font-weight:400}
+.updNotes{color:#d1d1d6;font-size:13.5px;line-height:1.5;text-align:left;background:#2c2c2e;border-radius:12px;padding:10px 12px;margin:8px 0 4px;max-height:30vh;overflow:auto}
+.updSub{color:#d1d1d6;font-size:13.5px;line-height:1.5;margin:10px 0 4px}.updSub.err{color:#ff6b6b}
+.updBar{height:8px;background:#2c2c2e;border-radius:6px;overflow:hidden;margin:14px 0 4px}.updBar i{display:block;height:100%;background:linear-gradient(90deg,#7b5cff,#fa2d48);transition:width .2s}
+.updBtns{display:flex;gap:10px;margin-top:14px}.updBtns button{flex:1;padding:12px 8px;border-radius:12px;background:#2c2c2e;color:#fff;font-size:15px;font-weight:600}
+.updBtns button.pri{background:var(--acc)}

@@ -161,7 +161,7 @@ async function doSearch(text, kind) {
   s.loading = false; if (curTab === "search") renderSearch();
 }
 
-const FOOTER = () => `<div class="dFoot"><img src="/dhun-mark.png" alt="" width="28" height="35"><div>Made with ❤️ for music lovers</div><div>Support &amp; love 💖 — Contact on Telegram: <a href="https://t.me/Memer_guru" target="_blank" rel="noopener">@Memer_guru</a></div></div>`;
+const FOOTER = () => `<div class="dFoot"><img src="/dhun-mark.png" alt="" width="26" height="32"><div class="dfT">Support &amp; Love 💖</div><div class="dfSig">Mavi</div><a class="dfBtn" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}Contact us</a></div>`;
 function renderLibrary() {
   if (subView === "settings") return renderSettings();
   if (subView) return renderPlaylistView(subView);
@@ -236,7 +236,7 @@ function renderSettings() {
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button></div>
-  <div class="setNote" style="margin:14px 20px 0;text-align:center">Dhun · free, no ads</div>${FOOTER()}`;
+  ${NATIVE ? `<div class="setCard" style="margin-top:18px"><button class="setRow" data-act="updCheck"><span><b>Check for updates</b><small>Dhun app v${esc(String((appVer && appVer.versionName) || "…"))}</small></span>${ICON.dl}</button></div>` : ""}<div class="setNote" style="margin:14px 20px 0;text-align:center">Dhun · free, no ads</div>${FOOTER()}`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -269,6 +269,7 @@ view.addEventListener("click", e => {
     if (a === "dlAll") { const p = subView && getPlaylist(subView); if (p) downloadAll(p.tracks); return; }
     if (a === "tgConnect") return tgConnectSheet();
     if (a === "acctConnect") return tgConnectSheet("Sign in to save your likes, playlists & history to your own account, on any phone");
+    if (a === "updCheck") { toast("Checking for updates…"); updCheck(true); return; }
     if (a === "syncNow") { tgRefresh(true); syncPull(true).then(() => toast(syncErr ? "Couldn't sync, check internet" : "Synced ✅")); acctUi(); return; }
     if (a === "tgOpen") { window.open(`https://t.me/${tgBot}`, "_blank"); return; }
     if (a === "tgOff") { if (confirm("Log out of your Dhun account on this phone? Your likes, playlists and Telegram songs stay saved in your account — connect again to get them back.")) tgDisconnect(); return; }
@@ -1011,5 +1012,91 @@ if (NATIVE) {
   });
   if (!navigator.onLine && Object.keys(offIdx).length) { curTab = "library"; subView = "offline"; tabs.forEach(b => b.classList.toggle("on", b.dataset.tab === "library")); }
 }
+// ---------- in-app updates (Android app only): the Dhun site says which APK is newest; download it here and hand it to the installer ----------
+const UPD = NATIVE ? (window.Capacitor.Plugins.DhunUpdater || null) : null;
+let appVer = store.get("appVer", null), updState = null; // updState: { info, phase: "ask"|"dl"|"perm"|"err", pct, path, err }
+const updNewer = (remote, localCode) => { const r = parseInt(remote && remote.versionCode, 10), l = parseInt(localCode, 10); return Number.isFinite(r) && Number.isFinite(l) && r > l; };
+const updUrlOk = u => /^https:\/\//i.test(String(u || ""));
+async function updVersion() { if (!UPD) return null; try { appVer = await UPD.getVersion(); store.set("appVer", appVer); } catch (e) {} return appVer; }
+async function updCheck(manual) {
+  if (!UPD) return;
+  const last = store.get("updLast", 0);
+  if (!manual && Date.now() - last < 6 * 3600e3) return;
+  if (!navigator.onLine) { if (manual) toast("You're offline"); return; }
+  store.set("updLast", Date.now());
+  const v = await updVersion(); if (!v) { if (manual) toast("Couldn't read the app version"); return; }
+  let info;
+  try { info = await api("/api/app-version?c=" + v.versionCode); } catch (e) { if (manual) toast("Couldn't check for updates, try later"); return; }
+  if (!info || !updUrlOk(info.apkUrl) || !updNewer(info, v.versionCode)) { if (manual) toast(`You're on the latest version ✅ (v${v.versionName})`); return; }
+  updState = { info, phase: "ask", pct: 0 }; updRender();
+}
+function updRender() {
+  let el = $("#updDlg");
+  if (!updState) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement("div"); el.id = "updDlg"; document.body.appendChild(el); el.addEventListener("click", updClick); }
+  const { info, phase, pct, err } = updState, force = !!info.force;
+  const notes = info.notes ? `<div class="updNotes">${esc(String(info.notes)).replace(/\n/g, "<br>")}</div>` : "";
+  let body = "";
+  if (phase === "ask") body = `${notes}<div class="updBtns">${force ? "" : `<button data-u="later">Baad me</button>`}<button data-u="go" class="pri">Update now</button></div>`;
+  else if (phase === "dl") body = `<div class="updBar"><i style="width:${pct || 2}%"></i></div><div class="updSub">Downloading… ${pct ? pct + "%" : ""}</div>`;
+  else if (phase === "perm") body = `<div class="updSub">Update install karne ke liye Dhun ko permission chahiye: Settings me <b>“Allow from this source”</b> ON karo, phir wapas aao. Install apne aap shuru ho jayega.</div><div class="updBtns">${force ? "" : `<button data-u="later">Baad me</button>`}<button data-u="perm" class="pri">Settings kholo</button></div>`;
+  else if (phase === "inst") body = `<div class="updSub">Installer khul gaya, <b>Update</b> dabao ✅<br>Aapke songs aur playlists safe rahenge.</div><div class="updBtns"><button data-u="retry">Installer dobara kholo</button><button data-u="later">Close</button></div>`;
+  else if (phase === "err") body = `<div class="updSub err">Update failed: ${esc(err || "unknown error")}</div><div class="updBtns">${force ? "" : `<button data-u="later">Baad me</button>`}<button data-u="go" class="pri">Try again</button></div>`;
+  el.innerHTML = `<div class="updCard"><img src="/dhun-mark.png" alt="" width="34"><h3>Naya update available 🎉</h3><div class="updVer">v${esc(String(info.versionName || info.versionCode))}${appVer ? ` <span>· abhi v${esc(String(appVer.versionName))}</span>` : ""}</div>${body}</div>`;
+}
+function updClick(e) {
+  const b = e.target.closest("[data-u]"); if (!b) return;
+  const u = b.dataset.u;
+  if (u === "later") { updState = null; updRender(); }
+  else if (u === "go") updDownload();
+  else if (u === "perm") UPD.openInstallSettings().catch(err => { updState.phase = "err"; updState.err = (err && err.message) || "couldn't open Settings"; updRender(); });
+  else if (u === "retry") updInstall();
+}
+let updDlUrl = "";
+async function updDownload() {
+  if (!updState || updState.phase === "dl") return;
+  updState.phase = "dl"; updState.pct = 0; updRender();
+  const path = "dhun-update.apk";
+  updDlUrl = updState.info.apkUrl + (updState.info.apkUrl.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(updState.info.versionCode);
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await FS.deleteFile({ path, directory: "CACHE" }).catch(() => {});
+      await FS.downloadFile({ url: updDlUrl, path, directory: "CACHE", progress: true, connectTimeout: 20000, readTimeout: 30000 });
+      const st = await FS.stat({ path, directory: "CACHE" });
+      if (!st.size || st.size < 500000) throw new Error("file too small (" + (st.size || 0) + " bytes)");
+      if (updState.info.size && Math.abs(st.size - updState.info.size) > 0) throw new Error("download incomplete");
+      updState.path = (await FS.getUri({ path, directory: "CACHE" })).uri; lastErr = null; break;
+    } catch (e) { lastErr = e; }
+  }
+  updDlUrl = "";
+  if (lastErr) { updState.phase = "err"; updState.err = offReason(lastErr).replace("song link expired (server said no)", "update file not found on the server"); updRender(); return; }
+  updInstall();
+}
+async function updInstall() {
+  if (!updState || !updState.path) return;
+  try {
+    const c = await UPD.canInstall();
+    if (!c.allowed) { updState.phase = "perm"; updRender(); return; }
+    await UPD.install({ path: updState.path });
+    updState.phase = "inst"; updRender();
+  } catch (e) {
+    const code = e && e.code, msg = (e && e.message) || "";
+    if (code === "NOT_ALLOWED" || /unknown apps/i.test(msg)) { updState.phase = "perm"; updRender(); return; }
+    if (code === "NOT_NEWER") { updState = null; updRender(); toast("Already up to date ✅"); return; }
+    updState.phase = "err"; updState.err = msg.replace(/^install: /, "") || "couldn't open the installer"; updRender();
+  }
+}
+if (UPD) {
+  try { FS.addListener("progress", p => { if (!updDlUrl || !p || p.url !== updDlUrl || !updState || updState.phase !== "dl") return; const pct = p.contentLength > 0 ? Math.min(99, Math.floor(p.bytes * 100 / p.contentLength)) : 0; if (pct !== updState.pct) { updState.pct = pct; updRender(); } }); } catch (e) {}
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    if (updState && updState.phase === "perm") { UPD.canInstall().then(c => { if (c.allowed) updInstall(); }).catch(() => {}); return; }
+    updCheck(false);
+  });
+  updVersion().then(() => { if (curTab === "library" && subView === "settings") rerender(); });
+  setTimeout(() => updCheck(false), 3000);
+}
+window.__upd = { updNewer, updUrlOk, updCheck, get state() { return updState; } };
 rerender(); syncPlay();
 })();
