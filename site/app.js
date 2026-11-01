@@ -41,6 +41,17 @@ let liked = store.get("liked", []);
 let playlists = store.get("playlists", []);
 let recent = store.get("recent", []);
 let searches = store.get("searches", []);
+// listening history / For You / Recap / import state (declared early: render functions use them on first paint)
+const dayKey = (ts = Date.now()) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+let hist = (() => { const h = store.get("hist", null); return h && Array.isArray(h.songs) && h.days ? h : { songs: [], days: {} }; })();
+let histDirty = false, histSyncT = 0, histBusy = false;
+let histCurId = null, histCounted = false, histLastT = 0, histSecs = 0;
+let fy = store.get("fyCache", null), fyLoading = false;
+const svPls = {}; let svBackHome = false;
+let recapPeriod = store.get("recapPeriod", "week");
+const RECAP = { week: [7, "Week"], month: [30, "Month"], year: [365, "Year"] };
+const cap1 = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+const IMP_BASE = /(^|\.)tab\.bot$/.test(location.hostname) ? "" : "https://dhun.sites.tab.bot"; // the Android app has no own server
 const slim = t => { const o = { id: t.id, title: t.title, artist: t.artist, album: t.album || "", dur: t.dur || 0, thumb: t.thumb }; if (t.src) o.src = t.src; if (t.url) o.url = t.url; if (t.sid) o.sid = t.sid; if (t.tg) o.tg = 1; if (t.src) o.src = t.src; return o; };
 const isLiked = id => liked.some(t => t.id === id);
 function toggleLike(t) {
@@ -100,7 +111,7 @@ function installCard() {
   return `<div class="install"><button data-act="hideInstall">×</button><b>Make it an app:</b> ${ios ? "tap the Share button <b>⎋</b> in Safari, then <b>Add to Home Screen</b>." : "open your browser menu and choose <b>Add to Home Screen</b> / <b>Install app</b>."} It opens full-screen, no ads, keeps playing when you lock your phone.</div>`;
 }
 function renderHome() {
-  let h = `<div class="brandBar"><img src="/logo-h.webp?v=15" alt="Dhun" width="104" height="48"></div><h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}${dealsHomeHTML()}`;
+  let h = `<div class="brandBar"><img src="/logo-h.webp?v=16" alt="Dhun" width="104" height="48"></div><h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}${dealsHomeHTML()}${fyHomeHTML()}`;
   if (!navigator.onLine) h += `<div class="install offline"><b>You're offline.</b> Dhun needs internet to play. Your downloaded songs are safe in Telegram.</div>`;
   if (recent.length) { bindList("recent", recent.slice(0, 20)); h += `<h2>Recently Played</h2><div class="car">${recent.slice(0, 20).map((t, i) => tileHTML(t, i, "recent")).join("")}</div>`; }
   if (homeData) {
@@ -162,6 +173,7 @@ async function doSearch(text, kind) {
 
 function renderLibrary() {
   if (subView === "settings") return renderSettings();
+  if (subView === "recap") return renderRecap();
   if (subView) return renderPlaylistView(subView);
   const nd = Object.keys(dlIdx).length;
   let h = `<h1 class="hrow">Library<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${acctHTML(true)}<div class="libLinks">
@@ -169,7 +181,8 @@ function renderLibrary() {
     <button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${tgMe.linked ? `${nd} song${nd === 1 ? "" : "s"}${tgMe.username ? " · @" + esc(tgMe.username) : ""}` : "Not connected"}${dlJobs.size ? ` · ${dlJobs.size} sending` : ""}</small></span></button>
     <button data-open="recent">${ICON.clock}<span>Recently Played</span></button>
     <button data-act="newPlaylist">${ICON.plus}<span>New Playlist…</span></button>
-    <button data-act="importPl" class="impRow"><i class="impLogos">${SPICON}${AMICON}</i><span>Import Playlist <small class="sub">Spotify · Apple Music</small></span></button></div>`;
+    <button data-act="importPl" class="impRow"><i class="impLogos">${SPICON}${AMICON}</i><span>Import Playlist <small class="sub">Spotify · Apple Music</small></span></button>
+    <button data-act="recap" class="rcLib"><i class="rcLibI">📊</i><span>Your Recap <small class="sub">Week · Month · Year</small></span></button></div>`;
   if (playlists.length) {
     h += `<h2>Playlists</h2><div class="grid">${playlists.map(pl => `<button class="tile" data-open="${esc(pl.id)}">${plArtHTML(pl)}<div class="t1">${esc(pl.name)}</div><div class="t2">${pl.tracks.length} song${pl.tracks.length === 1 ? "" : "s"}</div></button>`).join("")}</div>`;
   }
@@ -177,17 +190,17 @@ function renderLibrary() {
   view.innerHTML = h;
 }
 function dlTracks() { return Object.values(dlIdx).sort((a, b) => b.at - a.at).map(x => x.t); }
-function getPlaylist(id) { if (id === "downloads") return { id, name: "Telegram Downloads", tracks: dlTracks(), fixed: true, dl: true }; if (id === "liked") return { id, name: "Liked Songs", tracks: liked, fixed: true }; if (id === "recent") return { id, name: "Recently Played", tracks: recent, fixed: true }; return playlists.find(p => p.id === id); }
+function getPlaylist(id) { if (String(id).startsWith("sv:")) return svPlGet(String(id).slice(3)); if (id === "downloads") return { id, name: "Telegram Downloads", tracks: dlTracks(), fixed: true, dl: true }; if (id === "liked") return { id, name: "Liked Songs", tracks: liked, fixed: true }; if (id === "recent") return { id, name: "Recently Played", tracks: recent, fixed: true }; return playlists.find(p => p.id === id); }
 function renderPlaylistView(id) {
   const pl = getPlaylist(id); if (!pl) { subView = null; return renderLibrary(); }
   bindList("pl:" + id, pl.tracks);
-  view.innerHTML = `<button class="back" data-act="back">${ICON.chev}Library</button>
+  view.innerHTML = `<button class="back" data-act="back">${ICON.chev}${pl.remote && svBackHome ? "Listen Now" : "Library"}</button>
   <div class="hero">${plArtHTML(pl)}<h3>${esc(pl.name)}</h3><div class="sub">${pl.tracks.length} song${pl.tracks.length === 1 ? "" : "s"}</div></div>
   ${pl.tracks.length ? `<div class="btnRow"><button data-act="plPlay">${ICON.play}Play</button><button data-act="plShuffle">${ICON.shuffle}Shuffle</button></div>` : ""}
   ${pl.dl ? dlInfoHTML() : pl.tracks.length && id !== "recent" ? dlAllHTML(pl.tracks) : ""}
   ${pl.tracks.map((t, i) => rowHTML(t, i, "pl:" + id)).join("") || (pl.dl ? `<div class="empty">${tgMe.linked ? "Nothing here yet. Tap “···” on a song and choose Download to Telegram, or use Download All on Liked Songs or a playlist." : ""}</div>` : `<div class="empty">No songs yet. Tap “···” on any song and choose Add to Playlist.</div>`)}
   ${pl.dl && tgMe.linked ? `<div class="btnRow" style="margin-top:20px"><button data-act="tgOff" style="color:#ff453a">Log out</button></div>` : ""}
-  ${pl.fixed ? "" : `<div class="btnRow" style="margin-top:20px"><button data-act="renamePl">Rename</button><button data-act="deletePl" style="color:#ff453a">Delete Playlist</button></div>`}`;
+  ${pl.remote ? (pl.tracks.length ? `<div class="btnRow" style="margin-top:20px"><button data-act="savePl">${ICON.plus}Add to Library</button></div>` : pl.loading ? `<div class="empty">Loading…</div>` : "") : pl.fixed ? "" : `<div class="btnRow" style="margin-top:20px"><button data-act="renamePl">Rename</button><button data-act="deletePl" style="color:#ff453a">Delete Playlist</button></div>`}`;
 }
 
 
@@ -204,7 +217,7 @@ function dlInfoHTML() {
 }
 function segHTML(k, opts) { return `<div class="seg">${opts.map(v => `<button data-act="q" data-k="${k}" data-v="${v}" class="${cfg[k] === v ? "on" : ""}">${QNAME[v]}<small>${v}</small></button>`).join("")}</div>`; }
 function footHTML() {
-  return `<div class="dhunFoot"><img src="/dhun-mark.webp?v=15" alt="Dhun" width="30" height="30"><div class="f0">Created with</div><div class="f1">Support &amp; Love</div><div class="sig">Mavi💖</div><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>Contact us</span></a></div>`;
+  return `<div class="dhunFoot"><img src="/dhun-mark.webp?v=16" alt="Dhun" width="30" height="30"><div class="f0">Created with</div><div class="f1">Support &amp; Love</div><div class="sig">Mavi💖</div><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>Contact us</span></a></div>`;
 }
 function renderSettings() {
   const auto = autoNet(), c = conn(), cell = netKind() === "cell";
@@ -378,7 +391,7 @@ async function tgConnectSheet(why) {
   if (!tgCode) { try { const r = await post("/api/tg/new"); if (!r.code) throw 0; tgCode = r.code; tgBot = r.bot || tgBot; store.set("tgCode", tgCode); syncInit = false; store.set("syncInit", false); } catch (e) { return toast("Couldn't reach the server, try again"); } }
   const link = `https://t.me/${tgBot}?start=${tgCode}`;
   await new Promise(r => setTimeout(r, 60));
-  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=15" alt="Dhun"><span class="x">⇄</span><div class="tgLogo">${TGICON}</div></div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
+  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=16" alt="Dhun"><span class="x">⇄</span><div class="tgLogo">${TGICON}</div></div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
     <div class="tgSteps">1. Tap <b>Open Telegram</b><br>2. Tap <b>Start</b> in the bot chat<br>3. Come back here — your library syncs and downloads start on their own</div>
     <a class="tgBtn" href="${esc(link)}" target="_blank" rel="noopener">${TGICON}Open Telegram</a>
     <button data-s="check">I've tapped Start ✓</button></div>`, { check: async () => { const ok = await tgRefresh(); if (ok) tgLinked(); else setTimeout(() => tgConnectSheet("Not connected yet — open Telegram and tap Start"), 60); } });
@@ -446,6 +459,7 @@ async function tgDisconnect() {
   tgCode = ""; tgMe = { linked: false }; dlIdx = {}; store.set("tgCode", ""); store.set("tgMe", tgMe); saveDl();
   // this phone forgets the account's library; it stays saved in the account and comes back on the next connect
   syncApplying = true; liked = []; playlists = []; recent = []; store.set("liked", liked); store.set("playlists", playlists); store.set("recent", recent); syncApplying = false;
+  try { hist = { songs: [], days: {} }; store.set("hist", hist); fy = null; store.set("fyCache", null); } catch (e) {}
   syncInit = false; syncDirty = {}; syncAt = 0; store.set("syncInit", false); store.set("syncDirty", syncDirty); store.set("syncAt", 0);
   dlUi(); syncLike(); toast("Logged out. Your library is safe in your account");
 }
@@ -505,11 +519,11 @@ function tgNames(m) { m = m || {}; const first = realName(m.first) || realName(S
 function acctHTML(compact) {
   if (!tgMe.linked) return compact
     ? `<div class="acct off"><div class="acctTxt"><b>Sign in with Telegram</b><small>Save your likes & playlists to your own account, get them back on any phone</small></div><button data-act="acctConnect" class="tgB">${TGICON}Connect</button></div>`
-    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=15" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
+    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=16" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
   const nm = tgNames(tgMe), who = esc(nm.first), handle = tgMe.username ? "@" + esc(tgMe.username) : (tgMe.uid ? "ID " + esc(tgMe.uid) : "");
   const st = syncBusy ? "Syncing…" : Object.keys(syncDirty).length ? (syncErr === "offline" ? "Offline, will sync later" : "Saving…") : syncAt ? `Synced ${ago(syncAt)}` : "Syncing…";
   if (compact) return `<button class="acct on" data-act="settings"><div class="acctTxt"><b>☁️ ${who}${handle ? ` <span class="acctAt">${handle}</span>` : ""}</b><small>${st} · ${liked.length} liked · ${playlists.length} playlist${playlists.length === 1 ? "" : "s"}</small></div></button>`;
-  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=15" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>${who}</b><small>${handle ? handle + " · " : ""}Signed in with Telegram ✅</small></div></div>
+  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=16" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>${who}</b><small>${handle ? handle + " · " : ""}Signed in with Telegram ✅</small></div></div>
     <div class="setNote">☁️ ${st}<br>Your likes (${liked.length}), playlists (${playlists.length}), recently played and Telegram downloads (${Object.keys(dlIdx).length}) are saved to your account. Connect Telegram on any other phone to get them back.</div>
     <div class="btnRow" style="padding:10px 0 2px;margin:0"><button data-act="syncNow">Sync now</button><button data-act="tgOff" style="color:#ff453a">Log out</button></div></div>`;
 }
@@ -902,7 +916,6 @@ dealsTick(); dealsLoad();
 dealTimer = setInterval(dealsRotate, 6000);
 setInterval(dealsLoad, 5 * 60e3);
 // ---- Import playlist from Spotify / Apple Music (public link -> match on JioSaavn -> new Dhun playlist) ----
-const IMP_BASE = /(^|\.)tab\.bot$/.test(location.hostname) ? "" : "https://dhun.sites.tab.bot"; // the Android app has no own server
 let impJob = null; // { phase: "load"|"match"|"done"|"error", name, cover, source, total, done, found, missing:[], plId, msg }
 function impSheetHTML() {
   const j = impJob;
@@ -981,4 +994,162 @@ async function impStart(raw) {
   if (document.getElementById("impBox") && !sheet.classList.contains("hidden")) impShow(); else toast(`✅ “${name}” ready · ${job.found}/${job.total} gaane`);
 }
 document.addEventListener("click", e => { const b = e.target.closest("[data-act=importPl]"); if (b) { e.preventDefault(); e.stopPropagation(); if (impJob && (impJob.phase === "done" || impJob.phase === "error")) impJob = null; impShow(); } }, true);
+// ---- Listening history (per user), For You, Your Recap ----
+function histMergeL(a, b) {
+  const by = new Map();
+  for (const src of [a, b]) for (const s of ((src && src.songs) || [])) {
+    if (!s || !s.id) continue; const o = by.get(s.id);
+    if (!o) by.set(s.id, { ...s }); else { o.n = Math.max(o.n || 0, s.n || 0); o.first = Math.min(o.first || s.first || 0, s.first || o.first || 0); if ((s.last || 0) > (o.last || 0)) { o.last = s.last; for (const k of ["title", "artist", "album", "lang", "thumb"]) if (s[k]) o[k] = s[k]; } }
+  }
+  const days = {};
+  for (const src of [a, b]) for (const [k, v] of Object.entries((src && src.days) || {})) {
+    if (!v) continue; const o = days[k] || (days[k] = { t: 0, p: 0, s: {} });
+    o.t = Math.max(o.t, +v.t || 0); o.p = Math.max(o.p, +v.p || 0); for (const [id, n] of Object.entries(v.s || {})) o.s[id] = Math.max(o.s[id] || 0, +n || 0);
+  }
+  return histTrim({ songs: [...by.values()], days });
+}
+function histTrim(h) {
+  h.songs.sort((x, y) => (y.last || 0) - (x.last || 0)); if (h.songs.length > 1000) h.songs.length = 1000;
+  const ks = Object.keys(h.days).sort(); for (const k of ks.slice(0, Math.max(0, ks.length - 380))) delete h.days[k];
+  return h;
+}
+function histSave() { store.set("hist", hist); }
+function histToday() { const k = dayKey(); return hist.days[k] || (hist.days[k] = { t: 0, p: 0, s: {} }); }
+function histPlay(t) { // a play counts once the song has played 30 s
+  if (!t || !t.id) return; const now = Date.now();
+  let s = hist.songs.find(x => x.id === t.id);
+  if (!s) { s = { id: t.id, title: t.title || "", artist: t.artist || "", album: t.album || "", lang: t.lang || "", thumb: t.thumb || "", n: 0, first: now, last: now }; hist.songs.unshift(s); }
+  s.n = (s.n || 0) + 1; s.last = now; if (t.lang) s.lang = t.lang; if (t.thumb) s.thumb = t.thumb;
+  const d = histToday(); d.p++; d.s[t.id] = (d.s[t.id] || 0) + 1;
+  histTrim(hist); histSave(); histMark();
+}
+function histMark() { histDirty = true; clearTimeout(histSyncT); histSyncT = setTimeout(histSync, 45000); }
+async function histSync() {
+  if (!tgMe.linked || !tgCode || histBusy) return; histBusy = true;
+  try {
+    const sent = histDirty; histDirty = false;
+    const r = await post("/api/u/hist", sent ? { op: "put", c: tgCode, h: hist } : { op: "get", c: tgCode });
+    if (r && r.ok && r.h) { hist = histMergeL(r.h, hist); histSave(); }
+    else if (sent) histDirty = true;
+  } catch (e) { histDirty = true; } finally { histBusy = false; }
+}
+setInterval(() => {
+  const t = queue[qi], a = audio; if (!t || !a) return;
+  const ct = a.currentTime || 0;
+  if (histCurId !== t.id || (ct + 3 < histLastT && ct < 5)) { histCurId = t.id; histCounted = false; }
+  histLastT = ct;
+  if (a.paused || a.ended) return;
+  histSecs += 2; if (histSecs >= 10) { histToday().t += histSecs; histSecs = 0; histSave(); histDirty = true; }
+  if (!histCounted && ct >= 30) { histCounted = true; histPlay(t); }
+}, 2000);
+document.addEventListener("visibilitychange", () => { if (document.hidden && histDirty) histSync(); });
+setTimeout(histSync, 4000);
+
+// For You
+function fyProfile() {
+  const now = Date.now(); const sc = s => (s.n || 0) * (1 + Math.max(0, 1 - (now - (s.last || 0)) / (30 * 864e5)));
+  const top = hist.songs.filter(s => (s.n || 0) > 0).sort((a, b) => sc(b) - sc(a));
+  const art = {}, lg = {};
+  for (const s of hist.songs) { for (const a of String(s.artist || "").split(",").map(x => x.trim()).filter(Boolean).slice(0, 4)) art[a] = (art[a] || 0) + sc(s); if (s.lang) lg[s.lang] = (lg[s.lang] || 0) + (s.n || 0); }
+  return { seeds: top.slice(0, 5).map(s => s.id), artists: Object.entries(art).sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]), langs: Object.entries(lg).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]), exclude: hist.songs.filter(s => (s.n || 0) >= 3).map(s => s.id).slice(0, 300), day: dayKey() };
+}
+function fyLoad(force) {
+  const prof = fyProfile(); const sig = JSON.stringify([prof.seeds, prof.artists, prof.langs]);
+  const fresh = fy && fy.day === prof.day && (fy.sig === sig || Date.now() - (fy.at || 0) < 30 * 60e3);
+  if ((!force && fresh) || fyLoading) return;
+  fyLoading = true;
+  impPost("/api/foryou", prof).then(r => {
+    if (!r || !Array.isArray(r.songs) || (!r.songs.length && fy)) return;
+    fy = { mode: r.mode, songs: r.songs.slice(0, 20), playlists: (r.playlists || []).slice(0, 10), sig, day: prof.day, at: Date.now() };
+    store.set("fyCache", fy);
+    if (curTab === "home") { if (force || view.scrollTop < 60 || !document.getElementById("fyRow")) rerender(); }
+  }).catch(() => {}).finally(() => { fyLoading = false; });
+}
+function fyHomeHTML() {
+  let h = recapCardHTML();
+  if (!fy || !(fy.songs || []).length) { setTimeout(() => fyLoad(), 0); return h + `<h2>For You</h2><div class="car">${Array(4).fill('<div class="tile"><img class="skel"></div>').join("")}</div>`; }
+  setTimeout(() => fyLoad(), 0);
+  bindList("foryou", fy.songs);
+  h += `<h2 id="fyRow">${fy.mode === "personal" ? "For You" : "Top Picks For You"} <a data-act="fyRefresh">Refresh</a></h2><div class="car">${fy.songs.map((t, i) => tileHTML(t, i, "foryou")).join("")}</div>`;
+  if ((fy.playlists || []).length) h += `<h2>Playlists for You</h2><div class="car">${fy.playlists.map(p => `<button class="tile" data-svpl="${esc(p.id)}"><img loading="lazy" src="${esc(p.image || "/icon-192.png")}" onerror="this.onerror=null;this.src='/icon-192.png'" alt=""><div class="t1">${esc(p.title)}</div><div class="t2">${p.count ? p.count + " songs" : "Playlist"}</div></button>`).join("")}</div>`;
+  return h;
+}
+// JioSaavn playlists opened from "Playlists for You"
+function svPlGet(pid) {
+  const c = svPls[pid]; if (c && c.tracks) return c;
+  if (!c) { svPls[pid] = { id: "sv:" + pid, name: "Loading…", tracks: [], fixed: true, remote: true, loading: true };
+    fetch(IMP_BASE + "/api/svpl?id=" + encodeURIComponent(pid)).then(r => r.json()).then(d => { svPls[pid] = { id: "sv:" + pid, name: d.title || "Playlist", tracks: (d.items || []), fixed: true, remote: true }; if (subView === "sv:" + pid) rerender(); })
+      .catch(() => { svPls[pid] = { id: "sv:" + pid, name: "Couldn't load playlist", tracks: [], fixed: true, remote: true }; if (subView === "sv:" + pid) rerender(); }); }
+  return svPls[pid];
+}
+// Recap (Week / Month / Year)
+function recapCalc(period) {
+  const days = RECAP[period][0]; const since = Date.now() - days * 864e5; const sinceKey = dayKey(since + 864e5);
+  let secs = 0, plays = 0; const cnt = {}, perDay = {};
+  for (const [k, v] of Object.entries(hist.days)) { if (k < sinceKey) continue; secs += v.t || 0; plays += v.p || 0; perDay[k] = v.t || 0; for (const [id, n] of Object.entries(v.s || {})) cnt[id] = (cnt[id] || 0) + n; }
+  const meta = new Map(hist.songs.map(s => [s.id, s]));
+  const topSongs = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, n]) => ({ ...(meta.get(id) || { id, title: "Song", artist: "" }), plays: n }));
+  const ac = {}, lc = {};
+  for (const [id, n] of Object.entries(cnt)) { const s = meta.get(id); if (!s) continue; for (const a of String(s.artist || "").split(",").map(x => x.trim()).filter(Boolean).slice(0, 3)) ac[a] = (ac[a] || 0) + n; if (s.lang) lc[s.lang] = (lc[s.lang] || 0) + n; }
+  const topArtists = Object.entries(ac).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, n]) => ({ name, plays: n }));
+  const lang = Object.entries(lc).sort((a, b) => b[1] - a[1])[0];
+  const best = Object.entries(perDay).sort((a, b) => b[1] - a[1])[0];
+  const discoveries = hist.songs.filter(s => (s.first || 0) >= since).length;
+  return { period, days, minutes: Math.round(secs / 60), plays, songs: Object.keys(cnt).length, topSongs, topArtists, lang: lang ? lang[0] : "", bestDay: best && best[1] > 0 ? best[0] : "", bestMin: best ? Math.round(best[1] / 60) : 0, discoveries };
+}
+function bestDayLabel(k) { if (!k) return "—"; const [y, m, d] = k.split("-").map(Number); const dt = new Date(y, m - 1, d); return dt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" }); }
+function recapCardHTML() {
+  const r = recapCalc("week");
+  return `<button class="recapCard" data-act="recap"><span class="rcL"><b>Your Week in Dhun 🎧</b><small>${r.plays ? `${r.minutes} min · ${r.plays} plays · top: ${esc((r.topSongs[0] || {}).title || "")}` : "Gaane suno, aapka weekly recap yahan banega"}</small></span><span class="rcGo">${ICON.chev}</span></button>`;
+}
+function renderRecap() {
+  const r = recapCalc(recapPeriod); const lbl = RECAP[recapPeriod][1];
+  let h = `<button class="back" data-act="back">${ICON.chev}${svBackHome ? "Listen Now" : "Library"}</button><h1>Your Recap</h1>
+  <div class="rcTabs">${Object.keys(RECAP).map(k => `<button data-act="recapP" data-p="${k}" class="${k === recapPeriod ? "on" : ""}">${RECAP[k][1]}</button>`).join("")}</div>`;
+  if (!r.plays) {
+    h += `<div class="rcBox rcEmpty"><div class="rcEm">🎧</div><b>Abhi recap khaali hai</b><p>Is ${lbl.toLowerCase()} koi gaana 30 sec se zyada nahi suna. Gaane suno, aapka “Your ${lbl} in Dhun” yahan apne aap banega.</p></div>`;
+    view.innerHTML = h; return;
+  }
+  h += `<div class="rcBox rcHero"><small>Your ${lbl} in Dhun</small><div class="rcMin">${r.minutes.toLocaleString("en-IN")}</div><div class="rcMinL">minutes listened</div>
+    <div class="rcStats"><div><b>${r.plays}</b><small>plays</small></div><div><b>${r.songs}</b><small>songs</small></div><div><b>${r.discoveries}</b><small>new discoveries</small></div></div></div>
+  <div class="rcBox"><h3>Top Songs</h3>${r.topSongs.map((s, i) => `<div class="rcRow" data-rcplay="${i}"><span class="rcN">${i + 1}</span><img src="${esc(small(s.thumb) || "/icon-192.png")}" onerror="this.onerror=null;this.src='/icon-192.png'" alt=""><span class="rcT"><b>${esc(s.title)}</b><small>${esc(s.artist)}</small></span><span class="rcC">${s.plays}×</span></div>`).join("")}</div>
+  <div class="rcBox"><h3>Top Artists</h3>${r.topArtists.map((a, i) => `<div class="rcRow"><span class="rcN">${i + 1}</span><span class="rcT"><b>${esc(a.name)}</b></span><span class="rcC">${a.plays} plays</span></div>`).join("")}</div>
+  <div class="rcGrid"><div class="rcBox"><small>Top language</small><b>${esc(cap1(r.lang) || "—")}</b></div><div class="rcBox"><small>Most-played day</small><b>${esc(bestDayLabel(r.bestDay))}</b>${r.bestMin ? `<small>${r.bestMin} min</small>` : ""}</div></div>
+  <div class="btnRow" style="margin-top:16px"><button data-act="recapShare">${ICON.share}Share my Recap</button></div>`;
+  view.innerHTML = h;
+  bindList("recapTop", r.topSongs.map(s => ({ ...s, src: s.src || "saavn" })));
+}
+async function recapShare() {
+  const r = recapCalc(recapPeriod), lbl = RECAP[recapPeriod][1];
+  try { await document.fonts.load('700 40px "DhunComic"'); } catch (e) {}
+  const W = 1080, H = 1350, c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d");
+  const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, "#fa2d48"); g.addColorStop(0.55, "#7a1235"); g.addColorStop(1, "#141414"); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  const F = (w, s) => `${w} ${s}px "Comic Sans MS","Comic Neue","DhunComic",sans-serif`;
+  x.fillStyle = "#fff"; x.textAlign = "left";
+  x.font = F(700, 44); x.fillText(`Your ${lbl} in Dhun 🎧`, 80, 130);
+  x.font = F(700, 150); x.fillText(r.minutes.toLocaleString("en-IN"), 80, 310); x.font = F(400, 40); x.fillText("minutes listened", 86, 370);
+  x.font = F(700, 46); x.fillText(`${r.plays} plays · ${r.songs} songs · ${r.discoveries} new`, 80, 460);
+  const fit = (s, w) => { s = String(s || ""); while (s.length > 3 && x.measureText(s).width > w) s = s.slice(0, -2); return s === String(s) ? s : s; };
+  x.font = F(700, 44); x.fillText("Top Songs", 80, 560);
+  r.topSongs.forEach((s, i) => { x.font = F(700, 38); x.fillText(`${i + 1}. ${fit(s.title, 820)}`, 80, 625 + i * 62); });
+  x.font = F(700, 44); x.fillText("Top Artists", 80, 980);
+  x.font = F(400, 36); x.fillText(fit(r.topArtists.slice(0, 3).map(a => a.name).join(" · "), 920), 80, 1040);
+  x.font = F(400, 34); x.fillText(`Top language: ${cap1(r.lang) || "—"}   ·   Best day: ${bestDayLabel(r.bestDay)}`.slice(0, 70), 80, 1120);
+  x.font = F(700, 40); x.fillStyle = "rgba(255,255,255,.85)"; x.fillText("Dhun · dhun.sites.tab.bot", 80, 1260);
+  const blob = await new Promise(res => c.toBlob(res, "image/png"));
+  const file = new File([blob], `dhun-recap-${recapPeriod}.png`, { type: "image/png" });
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: `My ${lbl} in Dhun` }); return; } } catch (e) { if (e && e.name === "AbortError") return; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); toast("Recap image saved 📸");
+}
+document.addEventListener("click", e => {
+  const sp = e.target.closest("[data-svpl]"); if (sp) { e.preventDefault(); e.stopPropagation(); svBackHome = curTab === "home"; go("library", "sv:" + sp.dataset.svpl); return; }
+  const rp = e.target.closest("[data-rcplay]"); if (rp) { e.preventDefault(); e.stopPropagation(); const l = lists.recapTop; if (l) playList(l, +rp.dataset.rcplay); return; }
+  const b = e.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act;
+  if (a === "fyRefresh") { e.preventDefault(); e.stopPropagation(); toast("For You refresh ho raha hai…"); fyLoad(true); return; }
+  if (a === "recap") { e.preventDefault(); e.stopPropagation(); svBackHome = curTab === "home"; go("library", "recap"); return; }
+  if (a === "recapP") { e.preventDefault(); e.stopPropagation(); recapPeriod = b.dataset.p; store.set("recapPeriod", recapPeriod); rerender(); return; }
+  if (a === "recapShare") { e.preventDefault(); e.stopPropagation(); recapShare(); return; }
+  if (a === "savePl") { e.preventDefault(); e.stopPropagation(); const pl = subView && getPlaylist(subView); if (!pl || !pl.tracks.length) return; const np = { id: "p" + Date.now().toString(36), name: pl.name, tracks: pl.tracks.map(slim) }; playlists.unshift(np); store.set("playlists", playlists); toast(`“${pl.name}” Library me add ho gayi ✅`); return; }
+  if (a === "back" && (svBackHome && (String(subView || "").startsWith("sv:") || subView === "recap"))) { e.preventDefault(); e.stopPropagation(); svBackHome = false; go("home"); return; }
+}, true);
 })();

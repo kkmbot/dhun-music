@@ -927,16 +927,98 @@ async function impMatch(tracks) {
 }
 async function impBody(req) { try { const t = await req.text(); return t ? JSON.parse(t) : {}; } catch (e) { return {}; } }
 
+// ---------- Per-user listening history (signed-in users; kept in D1 kv "uh:<chat_id>", never mixed between users) ----------
+function histMerge(a, b) { // {songs:[{id,title,artist,album,lang,thumb,n,first,last}], days:{"YYYY-MM-DD":{t: seconds listened, p: plays, s:{id:plays}}}}
+  const out = { songs: [], days: {} }; const by = new Map();
+  for (const src of [a, b]) for (const s of ((src && src.songs) || [])) {
+    if (!s || !s.id) continue; const o = by.get(s.id);
+    if (!o) by.set(s.id, { ...s }); else { o.n = Math.max(o.n || 0, s.n || 0); o.first = Math.min(o.first || s.first || 0, s.first || o.first || 0); if ((s.last || 0) > (o.last || 0)) { o.last = s.last; for (const k of ["title", "artist", "album", "lang", "thumb"]) if (s[k]) o[k] = s[k]; } }
+  }
+  out.songs = [...by.values()].sort((x, y) => (y.last || 0) - (x.last || 0)).slice(0, 1500);
+  for (const src of [a, b]) for (const [day, v] of Object.entries((src && src.days) || {})) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !v) continue; const o = out.days[day] || (out.days[day] = { t: 0, p: 0, s: {} });
+    o.t = Math.max(o.t || 0, +v.t || 0); o.p = Math.max(o.p, +v.p || 0); for (const [id, n] of Object.entries(v.s || {})) o.s[id] = Math.max(o.s[id] || 0, +n || 0);
+  }
+  const keep = Object.keys(out.days).sort().slice(-400); const nd = {}; for (const k of keep) nd[k] = out.days[k]; out.days = nd;
+  return out;
+}
+async function userHist(env, ctx, body) {
+  const d = await db(env); const u = await userOf(d, body.c, ctx);
+  if (!u || !u.chat_id || !u.linked) return J({ error: "not_linked" }, 401);
+  const k = "uh:" + u.chat_id; let cur = { songs: [], days: {} };
+  try { const v = await kvGet(d, k); if (v) cur = JSON.parse(v); } catch (e) {}
+  if (body.op === "put" && body.h && typeof body.h === "object") {
+    cur = histMerge(cur, body.h);
+    let j = JSON.stringify(cur);
+    while (j.length > 1800000 && cur.songs.length > 200) { cur.songs = cur.songs.slice(0, Math.floor(cur.songs.length * 0.8)); j = JSON.stringify(cur); }
+    await kvSet(d, k, j);
+  }
+  return J({ ok: true, h: cur });
+}
+// ---------- For You: recommendations from the user's own top songs / artists / languages ----------
+const svImg = s => String(s || "").replace(/(150x150|50x50)/, "500x500");
+const svPl = x => x && x.id ? { id: String(x.id), title: ent(x.title || x.listname || ""), image: svImg(x.image), count: +((x.more_info && x.more_info.song_count) || x.count || 0) || 0 } : null;
+function dayShuffle(arr, seed) { let h = 2166136261; for (const ch of String(seed)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); const rnd = () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296; const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+async function svCharts() { const k = "svcharts"; const h = memGet(k); if (h) return h; let out = []; try { const r = await sv("content.getCharts", {}); out = (Array.isArray(r) ? r : []).map(svPl).filter(Boolean); } catch (e) {} if (out.length) memSet(k, out, 6 * 3600); return out; }
+async function svFeatured() { const k = "svfeat"; const h = memGet(k); if (h) return h; let out = []; try { const r = await sv("content.getFeaturedPlaylists", { n: "50", p: "1" }); out = ((r && r.data) || []).map(svPl).filter(Boolean); } catch (e) {} if (out.length) memSet(k, out, 6 * 3600); return out; }
+async function forYou(b) {
+  const seeds = (Array.isArray(b.seeds) ? b.seeds : []).map(String).filter(x => /^[\w-]{4,20}$/.test(x)).slice(0, 6);
+  const artists = (Array.isArray(b.artists) ? b.artists : []).map(x => String(x).slice(0, 60)).filter(Boolean).slice(0, 3);
+  const langs = (Array.isArray(b.langs) ? b.langs : []).map(x => String(x).toLowerCase().replace(/[^a-z]/g, "")).filter(Boolean).slice(0, 2);
+  const excl = new Set([...(Array.isArray(b.exclude) ? b.exclude : []).map(String).slice(0, 400), ...seeds]);
+  const day = String(b.day || "").slice(0, 10);
+  const key = "fy:" + JSON.stringify([seeds, artists, langs, day]); const hit = memGet(key);
+  let songs = [], playlists = [], mode = seeds.length ? "personal" : "trending";
+  if (hit) { songs = hit.songs; playlists = hit.playlists; mode = hit.mode; }
+  else {
+    const jobs = [];
+    if (seeds.length) {
+      jobs.push((async () => { const st = await sv("webradio.createEntityStation", { entity_id: JSON.stringify(seeds.slice(0, 5)), entity_type: "queue" }, "android"); if (!st || !st.stationid) return []; const r = await sv("webradio.getSong", { stationid: st.stationid, k: "30", next: "1" }, "android"); return svList(Object.values(r || {}).map(x => x && x.song).filter(Boolean)); })().catch(() => []));
+      for (const id of seeds.slice(0, 3)) jobs.push(sv("reco.getreco", { pid: id }, "android").then(r => svList(Array.isArray(r) ? r : (r && r[id]) || [])).catch(() => []));
+    }
+    for (const a of artists.slice(0, 2)) jobs.push(svSearch(a, 15).catch(() => []));
+    if (!seeds.length) jobs.push(svTrending().catch(() => []));
+    const res = await Promise.all(jobs);
+    const seen = new Set(); const pool = [];
+    // interleave sources so one seed doesn't dominate
+    const tk = t => impNorm(impCleanTitle(t.title)) + "|" + impNorm(String(t.artist || "").split(",")[0]);
+    for (let i = 0; i < 40; i++) for (const list of res) { const t = list[i]; if (t && !seen.has(t.id) && !seen.has(tk(t)) && !excl.has(t.id)) { seen.add(t.id); seen.add(tk(t)); pool.push(t); } }
+    songs = seeds.length ? dayShuffle(pool.slice(0, 36), day + seeds.join()).slice(0, 20) : pool.slice(0, 20);
+    if (songs.length < 8) { try { const tr = await svTrending(); for (const t of tr) if (!seen.has(t.id) && songs.length < 20) { seen.add(t.id); songs.push(t); } } catch (e) {} }
+    // playlists: artist playlists + charts/featured in the user's languages
+    const pls = []; const pseen = new Set(); const addP = p => { if (p && !pseen.has(p.id) && p.title) { pseen.add(p.id); pls.push(p); } };
+    const pj = artists.slice(0, 3).map(a => { const an = impNorm(a); return sv("search.getPlaylistResults", { q: a, n: "6", p: "1" }).then(r => ((r && r.results) || []).map(svPl).filter(p => p && impNorm(p.title).includes(an)).slice(0, 2)).catch(() => []); });
+    const [charts, feat, ...ap] = await Promise.all([svCharts(), svFeatured(), ...pj]);
+    ap.forEach(l => l.forEach(addP));
+    const langRe = langs.length ? new RegExp("\\b(" + langs.join("|") + ")\\b", "i") : null;
+    for (const p of charts) if (!langRe || langRe.test(p.title)) addP(p);
+    for (const p of feat) if (langRe && langRe.test(p.title)) addP(p);
+    if (pls.length < 6) for (const p of charts.concat(feat)) { if (pls.length >= 10) break; addP(p); }
+    playlists = pls.slice(0, 10);
+    memSet(key, { songs, playlists, mode }, 3 * 3600);
+  }
+  return { mode, songs, playlists };
+}
+async function svPlaylist(id) {
+  const k = "svpl:" + id; const h = memGet(k); if (h) return h;
+  const d = await sv("playlist.getDetails", { listid: id, n: "60", p: "1" });
+  const o = { id, title: ent(d.title || d.listname || "Playlist"), image: svImg(d.image), items: svList(d.list) };
+  if (o.items.length) memSet(k, o, 3600); return o;
+}
+
 export default {
   async fetch(req, env, ctx) {
     loadConfig(env, req);
     const u = new URL(req.url), p = u.pathname, q = (u.searchParams.get("q") || "").slice(0, 200), v = u.searchParams.get("v") || "", id = u.searchParams.get("id") || "";
     try {
+      if (p === "/api/u/hist") return await userHist(env, ctx, await impBody(req)); // per-user listening history (signed-in)
       if (p.startsWith("/api/tg/") || p.startsWith("/api/u/")) return await tgRoute(p, req, env, u, ctx);
       if (p === "/api/app-version") { // Android in-app updater; values live in /app-version.json (edit that file + swap /dhun.apk to ship a new version)
         let v = {}; try { const r = await env.ASSETS.fetch(new Request(new URL("/app-version.json", u), { headers: { "cache-control": "no-cache" } })); v = await r.json(); } catch (e) {}
         return new Response(JSON.stringify({ versionCode: Number(v.versionCode) || 0, versionName: String(v.versionName || ""), apkUrl: String(v.apkUrl || SITE + "dhun.apk"), notes: String(v.notes || ""), force: !!v.force, sha256: v.sha256 || "", bytes: Number(v.bytes || v.size) || 0, ...(Number(v.size) > 0 ? { size: Number(v.size) } : {}) }), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache, no-store, must-revalidate", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS" } });
       }
+      if (p === "/api/foryou") { const b = req.method === "POST" ? await impBody(req) : {}; try { return J(await forYou(b)); } catch (e) { return J({ mode: "error", songs: [], playlists: [] }); } }
+      if (p === "/api/svpl") { if (!/^\d{1,15}$/.test(id)) return J({ error: "bad id" }, 400); try { return J(await svPlaylist(id), 200, 1800); } catch (e) { return J({ id, title: "", items: [] }); } }
       if (p === "/api/import") { // public Spotify / Apple Music playlist -> {name, cover, tracks:[{title, artists, dur}]}
         const b = req.method === "POST" ? await impBody(req) : {}; const link = String(b.url || u.searchParams.get("url") || "").slice(0, 600);
         try { const o = await impFetch(env, link); return J({ ok: true, ...o }); }

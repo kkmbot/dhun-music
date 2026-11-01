@@ -1,5 +1,5 @@
-const C = "dhun-v15";
-const SHELL = ["/", "/app.css?v=15", "/app.js?v=15", "/manifest.webmanifest?v=15", "/favicon.ico?v=15", "/favicon-32.png?v=15", "/icon-192.png?v=15", "/icon-512.png?v=15", "/icon-192.png", "/apple-touch-icon.png?v=15", "/logo-h.webp?v=15", "/dhun-mark.webp?v=15", "/fonts/comic-neue-400.woff2?v=15", "/fonts/comic-neue-700.woff2?v=15"];
+const C = "dhun-v16";
+const SHELL = ["/", "/app.css?v=16", "/app.js?v=16", "/manifest.webmanifest?v=16", "/favicon.ico?v=16", "/favicon-32.png?v=16", "/icon-192.png?v=16", "/icon-512.png?v=16", "/icon-192.png", "/apple-touch-icon.png?v=16", "/logo-h.webp?v=16", "/dhun-mark.webp?v=16", "/fonts/comic-neue-400.woff2?v=16", "/fonts/comic-neue-700.woff2?v=16"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(C).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", e => {

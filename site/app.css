@@ -312,3 +312,40 @@ button,input,select,textarea{font-family:inherit}
 .impMiss li{font-size:14px;margin:6px 0;color:#e5e5ea}
 .impMiss li small{display:block;color:var(--sub);font-size:12px}
 .impSheet{max-height:calc(100vh - 140px - var(--st));overflow:auto}
+
+/* ---- For You + Recap (v16) ---- */
+.recapCard{display:flex;align-items:center;gap:10px;width:calc(100% - 32px);margin:4px 16px 2px;padding:12px 12px 12px 14px;border-radius:14px;text-align:left;color:#fff;background:linear-gradient(110deg,rgba(124,58,237,.35),rgba(250,45,72,.28) 60%,rgba(28,28,30,.9));border:.5px solid rgba(255,255,255,.12)}
+.recapCard .rcL{flex:1;min-width:0}
+.recapCard b{display:block;font-size:16px}
+.recapCard small{display:block;font-size:12.5px;color:#d1d1d6;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recapCard .rcGo svg{width:18px;height:18px;fill:#d1d1d6;transform:rotate(180deg)}
+.recapCard:active{opacity:.7}
+.rcLibI{font-style:normal;font-size:19px;width:24px;text-align:center;flex:none;margin-top:-12px}
+.rcTabs{display:flex;gap:6px;margin:6px 16px 14px;padding:4px;background:#1c1c1e;border-radius:12px}
+.rcTabs button{flex:1;padding:8px 0;border-radius:9px;font-size:15px;font-weight:700;color:#aeaeb2}
+.rcTabs button.on{background:#3a3a3c;color:#fff}
+.rcBox{margin:0 16px 12px;padding:14px;border-radius:16px;background:#1c1c1e}
+.rcBox h3{font-size:17px;margin:0 0 8px}
+.rcHero{background:linear-gradient(150deg,#fa2d48,#7a1235 60%,#2a0f17);text-align:center;padding:20px 14px}
+.rcHero>small{font-size:14px;color:#ffd6dc}
+.rcMin{font-size:56px;font-weight:700;line-height:1.1;margin-top:6px}
+.rcMinL{font-size:14px;color:#ffe3e7}
+.rcStats{display:flex;margin-top:16px;gap:8px}
+.rcStats div{flex:1;background:rgba(0,0,0,.22);border-radius:12px;padding:8px 4px}
+.rcStats b{display:block;font-size:20px}
+.rcStats small{font-size:11.5px;color:#ffe3e7}
+.rcRow{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:.5px solid #2c2c2e}
+.rcRow:first-of-type{border-top:0}
+.rcN{width:18px;text-align:center;color:var(--acc);font-weight:700;flex:none}
+.rcRow img{width:42px;height:42px;border-radius:6px;object-fit:cover;flex:none;background:#2c2c2e}
+.rcT{flex:1;min-width:0}
+.rcT b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rcT small{display:block;font-size:12.5px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rcC{font-size:13px;color:var(--sub);flex:none}
+.rcGrid{display:flex;gap:0;margin:0 8px}
+.rcGrid .rcBox{flex:1;margin:0 8px 12px;text-align:center}
+.rcGrid small{display:block;color:var(--sub);font-size:12.5px}
+.rcGrid b{display:block;font-size:17px;margin:4px 0 2px}
+.rcEmpty{text-align:center;padding:26px 18px}
+.rcEm{font-size:44px}
+.rcEmpty p{color:var(--sub);font-size:14px;line-height:1.45;margin:8px 0 0}
