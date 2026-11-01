@@ -326,7 +326,7 @@ function openTrackSheet(t, ctx, idx) {
     ${ctx === "pl:recent" ? `<button data-s="rmr" class="danger">Remove from Recently Played ${ICON.trash}</button>` : ""}</div>`, {
     next: () => { addToQueue(t, true); },
     last: () => { addToQueue(t, false); },
-    radio: () => startRadio(t),
+    radio: () => { startRadio(t); },
     dl: () => download(t), undl: () => removeDl(t.id), noop: () => {},
     like: () => toggleLike(t),
     addpl: () => { setTimeout(() => openAddToPlaylist(t), 50); },
@@ -622,8 +622,14 @@ async function migrateLibrary() {
 }
 setTimeout(() => migrateLibrary().catch(() => {}), 2500);
 
+// the song in the player right now (same id), not finished: picking it again keeps its place instead of restarting at 0:00
+function keepCur(t) { const c = queue[qi]; if (!c || !t || c.id !== t.id) return false; const d = P.dur(); if (mode !== "yt" && audio.src && (audio.ended || (d && audio.currentTime > d - 1.5))) return false; return true; }
+function curPos() { const t = queue[qi]; if (!t) return 0; if (mode === "yt" || audio.src) return P.time() || 0; return resumeAt(); }
+function keepPlaying() { renderQueue(); highlightRows(); prepNext(); if (!P.playing()) P.play(); else syncPlay(); }
 function playList(list, i) {
-  queue = list.map(slim); qi = Math.max(0, Math.min(i, queue.length - 1)); autoplayAdded = new Set();
+  const j = Math.max(0, Math.min(i, list.length - 1));
+  if (keepCur(list[j])) { const cur = queue[qi]; queue = list.map(slim); qi = j; queue[qi] = cur; autoplayAdded = new Set(); saveQ(); keepPlaying(); maybeAutoplayFill(); return; }
+  queue = list.map(slim); qi = j; autoplayAdded = new Set();
   saveQ(); loadCurrent(true);
 }
 function addToQueue(t, next) {
@@ -634,7 +640,8 @@ function addToQueue(t, next) {
 const radioURL = t => `/api/radio?src=${t.src === "saavn" ? "saavn" : ""}&v=${encodeURIComponent(t.src === "saavn" ? t.id : (resolved[t.id] && resolved[t.id].sid) || t.id)}&artist=${encodeURIComponent(t.artist || "")}`;
 async function startRadio(t) {
   toast("Starting station…");
-  playList([t], 0);
+  if (keepCur(t)) { queue = [queue[qi]]; qi = 0; autoplayAdded = new Set(); saveQ(); keepPlaying(); } // same song keeps playing from where it is
+  else playList([t], 0);
   try { const d = await api(radioURL(t)); const more = (d.items || []).filter(x => x.id !== t.id); queue = [queue[0], ...more.map(slim)]; qi = 0; saveQ(); renderQueue(); prepNext(); } catch (e) {}
 }
 // Make sure the NEXT song already has a playable URL, so 'ended' can switch instantly (iOS freezes timers when locked)
@@ -780,7 +787,7 @@ $("#queueList").addEventListener("click", e => {
   const more = e.target.closest("[data-more]"); if (more) { e.stopPropagation(); const row = more.closest("[data-i]"); const i = +row.dataset.i; const t = queue[i];
     return showSheet(`<div class="sgroup"><div class="shead"><div class="t1">${esc(t.title)}</div></div><button data-s="top">Move to Top ${ICON.playNext}</button><button data-s="like">${isLiked(t.id) ? "Unlike" : "Love"} ${ICON.heartO}</button><button data-s="addpl">Add to Playlist… ${ICON.pl}</button><button data-s="rm" class="danger">Remove from Queue ${ICON.trash}</button></div>`, {
       top: () => { queue.splice(i, 1); queue.splice(qi + 1, 0, t); saveQ(); renderQueue(); }, like: () => toggleLike(t), addpl: () => setTimeout(() => openAddToPlaylist(t), 50), rm: () => { queue.splice(i, 1); saveQ(); renderQueue(); } }); }
-  const row = e.target.closest("[data-i]"); if (row) { qi = +row.dataset.i; saveQ(); loadCurrent(true); }
+  const row = e.target.closest("[data-i]"); if (row) { const ni = +row.dataset.i; if (keepCur(queue[ni])) { qi = ni; saveQ(); return keepPlaying(); } qi = ni; saveQ(); loadCurrent(true); }
 });
 function syncModes() {
   $("#npShuffle").classList.toggle("on", shuffle); $("#npRepeat").classList.toggle("on", repeat > 0);
@@ -1207,7 +1214,7 @@ async function jamReq(path, body) {
 async function jamClock() { for (let k = 0; k < 4; k++) { try { await jamReq("/api/jam/t?_=" + Math.random()); } catch (e) {} } }
 const jamSlim = t => { const o = slim(t); delete o.tg; if (!o.url) { const u = urlOf(t); if (/^https:/.test(u)) o.url = u; } return o; };
 function jamUnlock() { // inside the tap: lets later play() calls start audio (iOS / Chrome autoplay rules)
-  try { if (audio.paused && mode !== "yt") { const p = audio.play(); if (p) p.catch(() => {}); if (!queue[qi] || !audio.src) audio.pause(); } } catch (e) {}
+  try { if (audio.paused && mode !== "yt") { const p = audio.play(); if (p) p.catch(() => {}); audio.pause(); } } catch (e) {} // a paused song stays paused, at its place
 }
 // ----- applying the room's state to this device -----
 function jamApply(st, fromServer) {
@@ -1244,7 +1251,7 @@ function jamCheck(force) { // keep this device on the room's clock: play/pause +
       return;
     }
     const d = P.dur(); if (d && exp > d + 1) return; // song over on the room's clock; whoever hits 'ended' first moves the room on
-    if (!P.playing()) { if (!userPaused || force) { rawPlay(); } return; }
+    if (!P.playing()) { if (!userPaused || force) { if (mode !== "yt" && !audio.src) loadCurrent(true, exp); else rawPlay(); } return; }
     if (mode === "yt") { const dd = P.time() - exp; if (Math.abs(dd) > 1.5 && now - jamSeekAt > 4000) { jamSeekAt = now; rawSeek(exp); } return; }
     if (audio.readyState < 3 || now - jamLoadAt < 1200) return; // still buffering
     const drift = audio.currentTime - exp;
@@ -1263,13 +1270,14 @@ async function jamAct(a, optimistic) {
   jamPend++;
   try {
     const j = await jamReq("/api/jam/act", { c: jam.code, m: jamMid, n: jamName(), a });
-    if (j.gone) return jamGone();
+    if (j.gone) return jamGone(j.ended);
     if (j.ok && j.st && j.rev >= (jam.rev || 0)) { jam.rev = j.rev; if (j.mem) jamMembers(j.mem); jamApply(j.st, true); }
   } catch (e) { toast("Listen Together: connection slow, retry ho raha hai…"); }
   finally { jamPend--; }
 }
 function jamPredict(mut) { // apply a change on this phone right away; the server's answer confirms it
-  const st = JSON.parse(JSON.stringify(jam.st || {})); mut(st); st.at = jamNow(); jamApply(st, false);
+  const st = JSON.parse(JSON.stringify(jam.st || {})); if (st.song) st.pos = jamExp(st); st.at = jamNow(); // carry the room's clock forward first, so queue/shuffle/etc. never pull the song back
+  mut(st); st.at = jamNow(); jamApply(st, false);
 }
 async function jamPoll() {
   clearTimeout(jamPollT); if (!jamOn()) return;
@@ -1278,10 +1286,11 @@ async function jamPoll() {
     jamBusy = true;
     try {
       const hb = Date.now() - jamHbAt > 8000; if (hb) jamHbAt = Date.now();
-      const j = await jamReq(`/api/jam/get?c=${code}&m=${jamMid}&r=${jam.rev || 0}${hb ? "&hb=1&n=" + encodeURIComponent(jamName()) : ""}&_=${Date.now() % 1e6}`);
+      const j = await jamReq(`/api/jam/get?c=${code}&m=${jamMid}&r=${jam.rev || 0}&k=${jamChatK}${hb ? "&hb=1&n=" + encodeURIComponent(jamName()) : ""}&_=${Date.now() % 1e6}`);
       if (!jamOn() || jam.code !== code) return;
       jamFail = 0;
-      if (j.gone) return jamGone();
+      if (j.gone) return jamGone(j.ended);
+      if (j.chat) jamChatIn(j.chat, false);
       if (j.mem) jamMembers(j.mem);
       if (!j.same && j.st && j.rev > (jam.rev || 0) && !jamPend) { const ev = j.st.ev, by = j.st.by; jam.rev = j.rev; jamToast(ev, by); jamApply(j.st, true); }
     } catch (e) { jamFail++; if (jamFail === 4) toast("Listen Together: internet slow hai…"); }
@@ -1292,7 +1301,7 @@ async function jamPoll() {
 function jamToast(ev, by) {
   if (!ev || !by || by.m === jamMid) return; const n = by.n || "Koi";
   const T = { song: `${n} ne gaana badla: ${ev.title || ""}`, next: `${n} ne next gaana lagaya`, prev: `${n} ne pichhla gaana lagaya`, pause: `${n} ne pause kiya ⏸`, play: `${n} ne play kiya ▶️`,
-    seek: `${n} ne gaana ${ev.to > ev.from ? "aage" : "peeche"} kiya`, add: `${n} ne queue me add kiya: ${ev.title || ""}`, rm: `${n} ne queue se hataya: ${ev.title || ""}`, top: `${n} ne ${ev.title || "gaana"} next kiya`, shuffle: `${n} ne queue shuffle ki` }[ev.t];
+    seek: `${n} ne gaana ${ev.to > ev.from ? "aage" : "peeche"} kiya`, add: `${n} ne queue me add kiya: ${ev.title || ""}`, rm: `${n} ne queue se hataya: ${ev.title || ""}`, top: `${n} ne ${ev.title || "gaana"} next kiya`, shuffle: `${n} ne queue shuffle ki`, station: `${n} ne station shuru kiya: ${ev.title || ""}` }[ev.t];
   if (T) toast(T);
 }
 function jamMembers(mem) {
@@ -1303,18 +1312,31 @@ function jamMembers(mem) {
   }
   jam.memInit = true; const changed = old.map(m => m.m + m.n).join() !== mem.map(m => m.m + m.n).join(); jam.mem = mem; if (changed) renderJamUI();
 }
-function jamGone() { toast("Listen Together session khatam ho gaya"); jamStop(); }
-function jamStop() { clearTimeout(jamPollT); jam = null; store.set("jam", null); if (audio.playbackRate !== 1) audio.playbackRate = 1; renderJamUI(); if (curTab === "library" || curTab === "home") rerender(); }
+function jamGone(ended) { // the room is over: this phone goes back to solo, the song keeps playing from where it is
+  const by = ended && ended.n && ended.m !== jamMid ? ended.n : "";
+  jamStop(); if (!sheet.classList.contains("hidden") && document.getElementById("jamBox")) closeSheet();
+  toast(by ? `${by} ne Listen Together band kiya` : "Listen Together session khatam ho gaya");
+}
+function jamStop() { clearTimeout(jamPollT); jam = null; store.set("jam", null); if (audio.playbackRate !== 1) audio.playbackRate = 1; jamChatReset(); renderJamUI(); if (curTab === "library" || curTab === "home") rerender(); }
+async function jamEnd() { // Stop for everyone
+  if (!jamOn()) return; const code = jam.code;
+  jamStop(); toast("Listen Together band kar diya (sabke liye) — gaana aapke phone pe chalta rahega");
+  for (let k = 0; k < 3; k++) { try { const j = await jamReq("/api/jam/end", { c: code, m: jamMid, n: jamName() }); if (j.ok || j.gone) return; } catch (e) {} await new Promise(r => setTimeout(r, 800)); }
+}
+function jamEndConfirm() {
+  if (!jamOn()) return;
+  showSheet(`<div class="sgroup jamSheet"><div class="jamHead"><i class="jamIco">${JAM_ICON}</i><div><b>Listen Together band karein?</b><div class="sub">Session sabke liye khatam ho jayega (${(jam.mem || []).length} log). Gaana sabke phone pe chalta rahega.</div></div></div>
+    <button data-s="jamEndGo" class="danger">Haan, sabke liye band karo</button><button data-s="jamLeave">Sirf main nikalun (Leave)</button></div>`, { jamEndGo: () => { jamEnd(); }, jamLeave: () => { jamLeave(false); } });
+}
 async function jamStart() {
   const nm = jamName(); if (!nm) return toast("Pehle apna naam likho");
   const cur = queue[qi];
-  const st = cur ? { song: jamSlim(cur), playing: P.playing(), pos: P.time() || 0, queue: queue.slice(qi + 1, qi + 51).map(jamSlim) } : {};
+  const st = cur ? { song: jamSlim(cur), playing: P.playing(), pos: curPos(), queue: queue.slice(qi + 1, qi + 51).map(jamSlim) } : {}; // the song keeps its place
   jamClock();
   try {
     const j = await jamReq("/api/jam/new", { m: jamMid, n: nm, st });
     if (!j.ok) throw new Error(j.msg || "fail");
-    jam = { code: j.code, rev: j.rev, st: j.st, mem: j.mem, memInit: true }; store.set("jam", { code: j.code });
-    if (cur) { jamApplying = true; try { if (P.playing()) rawSeek(P.time()); } finally { jamApplying = false; } } // keep playing as-is
+    jam = { code: j.code, rev: j.rev, st: j.st, mem: j.mem, memInit: true }; store.set("jam", { code: j.code }); jamChatReset(); if (j.chat) jamChatIn(j.chat, true);
     jamApply(j.st, true); jamHbAt = Date.now(); jamPoll(); jamPrefetchFill();
     jamSheet(); if (curTab === "library" || curTab === "home") rerender();
     toast("Listen Together shuru 🎧 code: " + j.code);
@@ -1328,8 +1350,8 @@ async function jamJoin(code, quiet) {
   jamOffs = []; await jamClock();
   try {
     const j = await jamReq("/api/jam/join", { c: code, m: jamMid, n: nm || "Dost" });
-    if (!j.ok) { if (quiet) { store.set("jam", null); return; } return jamErr(j.msg || "Join nahi hua"); }
-    jam = { code, rev: j.rev, st: null, mem: j.mem, memInit: true }; store.set("jam", { code });
+    if (!j.ok) { if (quiet) { store.set("jam", null); if (j.ended && j.ended.n) toast(`${j.ended.n} ne Listen Together band kiya`); return; } return jamErr(j.msg || "Join nahi hua"); }
+    jam = { code, rev: j.rev, st: null, mem: j.mem, memInit: true }; store.set("jam", { code }); jamChatReset(); if (j.chat) jamChatIn(j.chat, true);
     jamApply(j.st, true); jamHbAt = Date.now(); jamPoll();
     if (!quiet) { closeSheet(); openNP(); const host = (j.st.by && j.st.by.n) || ""; toast(j.st.song ? `Listen Together me aa gaye 🎧 ${j.mem.length} log sun rahe hain` : `Join ho gaye 🎧 ${host ? host + " " : ""}gaana lagayenge to yahan bajega`); }
     if (curTab === "library" || curTab === "home") rerender();
@@ -1392,6 +1414,10 @@ playList = function (list, i) {
   if (!jamOn()) return rawPlayList(list, i);
   i = Math.max(0, Math.min(i, list.length - 1)); const t = list[i]; if (!t) return;
   const track = jamSlim(t), rest = list.slice(i + 1, i + 51).map(jamSlim);
+  if (jam.st && jam.st.song && jam.st.song.id === track.id && keepCur(track)) { // same song: everyone keeps their place
+    jamPredict(s => { const q = rest.filter(x => x.id !== track.id); if (!(s.queue || []).length) s.queue = q; s.pos = jamExp(s); s.playing = true; });
+    return jamAct({ t: "song", track, list: rest });
+  }
   jamPredict(s => { s.queue = (s.queue || []).filter(x => x.id !== track.id); if (!s.queue.length) s.queue = rest.filter(x => x.id !== track.id); if (s.song) s.hist = (s.hist || []).concat([s.song]).slice(-30); s.song = track; s.pos = 0; s.playing = true; });
   jamAct({ t: "song", track, list: rest });
 };
@@ -1406,7 +1432,13 @@ addToQueue = function (t, nx) {
 startRadio = function (t) {
   if (!jamOn()) return rawStartRadio(t);
   toast("Station shuru ho raha hai…");
-  api(radioURL(t)).then(d => { const more = (d.items || []).filter(x => x.id !== t.id); jamPredict(s => { s.queue = []; }); jamAct({ t: "clear" }).then(() => playList([t].concat(more), 0)); }).catch(() => playList([t], 0));
+  const track = jamSlim(t), same = !!(jam.st && jam.st.song && jam.st.song.id === track.id && keepCur(track));
+  api(radioURL(t)).then(d => {
+    const more = (d.items || []).filter(x => x.id !== t.id).slice(0, 50).map(jamSlim);
+    if (!jamOn()) return rawStartRadio(t);
+    jamPredict(s => { if (same) { s.pos = jamExp(s); s.playing = true; } else { if (s.song) s.hist = (s.hist || []).concat([s.song]).slice(-30); s.song = track; s.pos = 0; s.playing = true; } s.queue = more; });
+    jamAct({ t: "song", track, list: more, rq: 1 });
+  }).catch(() => { if (!same) playList([t], 0); else toast("Station nahi mila, internet check karo"); });
 };
 maybeAutoplayFill = function () { if (jamOn()) return; return rawFill(); };
 // queue panel: rows act on the room's queue
@@ -1431,13 +1463,13 @@ window.addEventListener("online", () => { if (jamOn()) jamPoll(); });
 // ----- UI -----
 const npJamBtn = document.createElement("button"); npJamBtn.id = "npJam"; npJamBtn.className = "icon small"; npJamBtn.setAttribute("aria-label", "Listen Together"); npJamBtn.innerHTML = JAM_ICON + '<b class="jamBadge"></b>';
 $(".npBottom").insertBefore(npJamBtn, $("#npRepeat")); npJamBtn.onclick = () => jamSheet();
-const npJamBar = document.createElement("button"); npJamBar.id = "npJamBar"; npJamBar.className = "hidden"; $("#npStatus").insertAdjacentElement("afterend", npJamBar); npJamBar.onclick = () => jamSheet();
+const npJamBar = document.createElement("button"); npJamBar.id = "npJamBar"; npJamBar.className = "hidden"; $("#npStatus").insertAdjacentElement("afterend", npJamBar); npJamBar.onclick = e => { if (e.target.closest(".jamBarChat")) return jamChatOpen(); jamSheet(); };
 function jamAvs(max) { const mem = (jam && jam.mem) || []; return mem.slice(0, max).map(m => jamAv(m)).join("") + (mem.length > max ? `<i class="jamAv more">+${mem.length - max}</i>` : ""); }
 function renderJamUI() {
   const on = jamOn(), n = on ? (jam.mem || []).length : 0;
-  npJamBtn.classList.toggle("on", on); npJamBtn.querySelector(".jamBadge").textContent = on && n ? n : "";
+  npJamBtn.classList.toggle("on", on); npJamBtn.querySelector(".jamBadge").textContent = on && n ? n : ""; npJamBtn.classList.toggle("unread", on && jamUnread > 0);
   npJamBar.classList.toggle("hidden", !on);
-  if (on) npJamBar.innerHTML = `<span class="jamAvs">${jamAvs(5)}</span><span class="jamBarT">Listen Together · ${n} ${n === 1 ? "person" : "log"}</span><span class="jamCodeS">${esc(jam.code)}</span>`;
+  if (on) npJamBar.innerHTML = `<span class="jamAvs">${jamAvs(5)}</span><span class="jamBarT">Listen Together · ${n} ${n === 1 ? "person" : "log"}</span><span class="jamCodeS">${esc(jam.code)}</span><span class="jamBarChat" role="button" aria-label="Chat">💬<b class="jamUnread">${jamUnread || ""}</b></span>`;
   $("#mini").classList.toggle("jamming", on);
   const sh = document.getElementById("jamBox"); if (sh && !sheet.classList.contains("hidden") && sh.dataset.on === String(on)) { const ml = document.getElementById("jamMem"); if (ml && on) ml.innerHTML = jamMemHTML(); }
 }
@@ -1449,8 +1481,11 @@ function jamSheet(joinCode) {
     showSheet(`<div class="sgroup jamSheet" id="jamBox" data-on="true"><div class="jamHead"><i class="jamIco">${JAM_ICON}</i><div><b>Listen Together <span class="jamLive">LIVE</span></b><div class="sub">Sab koi gaana badal, pause, aage-peeche kar sakta hai</div></div></div>
       <div class="jamCodeBox"><small>Session code</small><div class="jamCodeBig">${esc(c)}</div><small>Dost ko ye code ya link bhejo</small></div>
       <div class="jamShare"><a class="jamWa" href="https://wa.me/?text=${txt}" target="_blank" rel="noopener">WhatsApp</a><a class="jamTg" href="https://t.me/share/url?url=${encodeURIComponent(jamLink(c))}&text=${encodeURIComponent("Mere saath Dhun pe ek saath gaane suno 🎧 Code: " + c)}" target="_blank" rel="noopener">Telegram</a><button data-s="jamCopy">${navigator.share ? "Share…" : "Copy link"}</button></div>
+      <button class="jamChatBtn" data-s="jamChat">💬 Chat<b class="jamUnread">${jamUnread || ""}</b></button>
       <div class="jamMemH">Sun rahe hain</div><div id="jamMem">${jamMemHTML()}</div></div>
-      <div class="sgroup"><button data-s="jamLeave" class="danger">Leave Listen Together</button></div>`, {
+      <div class="sgroup"><button data-s="jamEnd" class="danger">Stop Listen Together (sabke liye)</button><button data-s="jamLeave">Leave (sirf main)</button></div>`, {
+      jamChat: () => { closeSheet(); jamChatOpen(); return true; },
+      jamEnd: () => { jamEndConfirm(); return true; },
       jamCopy: () => { const l = jamLink(c); if (navigator.share) { navigator.share({ title: "Dhun · Listen Together", text: jamShareText(c).split("\n")[0] + " Code: " + c, url: l }).catch(() => {}); return true; } (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(() => toast("Link copy ho gaya ✅")).catch(() => toast(l)); return true; },
       jamLeave: () => { jamLeave(false); },
     });
@@ -1474,6 +1509,71 @@ const rawRenderLibrary = renderLibrary;
 renderLibrary = function () { rawRenderLibrary(); if (subView) return; const ll = view.querySelector(".libLinks"); if (ll) { const imp = ll.querySelector("[data-act=importPl]"); const tmp = document.createElement("div"); tmp.innerHTML = jamRowHTML(); const el = tmp.firstElementChild; if (imp) ll.insertBefore(el, imp); else ll.appendChild(el); } };
 const rawRenderHome = renderHome;
 renderHome = function () { rawRenderHome(); if (!jamOn()) return; const tmp = document.createElement("div"); tmp.innerHTML = `<button data-act="jam" class="jamHome"><span class="jamAvs">${jamAvs(4)}</span><span><b>Listen Together live 🎧</b><small>${(jam.mem || []).length} log · code ${esc(jam.code)}</small></span></button>`; const h1 = view.querySelector("h1"); if (h1) h1.insertAdjacentElement("afterend", tmp.firstElementChild); };
+// ----- chat inside a Listen Together session (rides the room's polling; last 100 messages per room) -----
+let jamChatK = 0, jamMsgs = [], jamUnread = 0, jamChatIsOpen = false, jamPendMsgs = [];
+const JAM_CHAT_MAX = 300;
+const jamHM = t => { const d = new Date(t || Date.now()); return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+function jamChatReset() { jamChatK = 0; jamMsgs = []; jamUnread = 0; jamPendMsgs = []; jamChatClose(); }
+function jamChatIn(list, initial) {
+  let fresh = [];
+  for (const m of list || []) { if (!m || !(m.i > jamChatK)) continue; jamChatK = m.i; jamMsgs.push(m); fresh.push(m); jamPendMsgs = jamPendMsgs.filter(p => !(m.m === jamMid && p.x === m.x)); }
+  if (!fresh.length) return;
+  if (jamMsgs.length > 100) jamMsgs = jamMsgs.slice(-100);
+  const others = fresh.filter(m => m.m !== jamMid);
+  if (!initial && others.length) {
+    if (!jamChatIsOpen) { jamUnread += others.length; const m = others[others.length - 1]; toast(`💬 ${m.n}: ${m.x}`); }
+  }
+  jamChatRender(); renderJamUI(); jamUnreadUI();
+}
+function jamUnreadUI() { document.querySelectorAll(".jamUnread").forEach(b => { b.textContent = jamUnread ? (jamUnread > 99 ? "99+" : jamUnread) : ""; }); }
+const jamChatEl = document.createElement("div"); jamChatEl.id = "jamChatWrap"; jamChatEl.className = "hidden";
+jamChatEl.innerHTML = `<div id="jamChatBack"></div><section id="jamChat" role="dialog" aria-label="Listen Together chat">
+  <header class="jamChatHead"><i class="jamIco">💬</i><div class="jcT"><b>Chat</b><small id="jamChatSub"></small></div><button id="jamChatX" class="icon" aria-label="Close chat">✕</button></header>
+  <div id="jamChatList" aria-live="polite"></div>
+  <div class="jamChatQuick">${["🔥", "❤️", "😂", "👏", "🎶", "😍"].map(e => `<button type="button" data-q="${e}">${e}</button>`).join("")}</div>
+  <form id="jamChatForm" autocomplete="off"><input id="jamChatIn" maxlength="${JAM_CHAT_MAX}" placeholder="Message likho…" enterkeyhint="send" autocomplete="off"><button type="submit" id="jamChatSend" aria-label="Send">➤</button></form>
+</section>`;
+document.body.appendChild(jamChatEl);
+function jamChatOpen() {
+  if (!jamOn()) return;
+  jamChatIsOpen = true; jamUnread = 0; jamUnreadUI(); renderJamUI();
+  jamChatEl.classList.remove("hidden"); jamChatRender(true);
+}
+function jamChatClose() { jamChatIsOpen = false; jamChatEl.classList.add("hidden"); const i = document.getElementById("jamChatIn"); if (i) i.blur(); }
+function jamChatRender(scroll) {
+  const list = document.getElementById("jamChatList"); if (!list) return;
+  const sub = document.getElementById("jamChatSub"); if (sub && jam) sub.textContent = `Listen Together · ${jam.code} · ${(jam.mem || []).length} log`;
+  if (!jamChatIsOpen) return;
+  const atEnd = scroll || list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+  const all = jamMsgs.concat(jamPendMsgs.map(p => ({ m: jamMid, n: jamName(), x: p.x, t: p.t, pend: 1 })));
+  let prev = "";
+  list.innerHTML = all.length ? all.map(m => { const me = m.m === jamMid, show = !me && prev !== m.m; prev = m.m;
+    return `<div class="jcMsg${me ? " me" : ""}${m.pend ? " pend" : ""}">${me ? "" : show ? jamAv({ m: m.m, n: m.n }) : '<i class="jamAv sp"></i>'}<div class="jcB">${show ? `<small class="jcN" style="color:${jamColor(m.m)}">${esc(m.n)}</small>` : ""}<span class="jcX">${esc(m.x)}</span><small class="jcTm">${m.pend ? "…" : jamHM(m.t)}</small></div></div>`; }).join("")
+    : `<div class="jcEmpty">Abhi koi message nahi. Kuch likho — sab ko dikhega 👋</div>`;
+  if (atEnd) list.scrollTop = list.scrollHeight;
+}
+async function jamChatSend(text) {
+  const x = String(text || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").trim().slice(0, JAM_CHAT_MAX);
+  if (!x || !jamOn()) return;
+  const p = { x, t: Date.now() }; jamPendMsgs.push(p); jamChatRender(true);
+  const code = jam.code;
+  for (let k = 0; k < 2; k++) {
+    try {
+      const j = await jamReq("/api/jam/chat", { c: code, m: jamMid, n: jamName(), x, k: jamChatK });
+      if (!jamOn() || jam.code !== code) return;
+      if (j.gone) return jamGone(j.ended);
+      if (j.ok) { jamPendMsgs = jamPendMsgs.filter(q => q !== p); if (j.chat) jamChatIn(j.chat, false); jamChatRender(true); return; }
+      if (j.msg) { toast(j.msg); break; }
+    } catch (e) {}
+  }
+  jamPendMsgs = jamPendMsgs.filter(q => q !== p); jamChatRender(); toast("Message nahi gaya, dobara bhejo");
+  const i = document.getElementById("jamChatIn"); if (i && !i.value) i.value = x;
+}
+document.getElementById("jamChatX").onclick = jamChatClose;
+document.getElementById("jamChatBack").onclick = jamChatClose;
+document.getElementById("jamChatForm").addEventListener("submit", e => { e.preventDefault(); const i = document.getElementById("jamChatIn"); const v = i.value; i.value = ""; jamChatSend(v); i.focus(); });
+jamChatEl.querySelector(".jamChatQuick").addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b) jamChatSend(b.dataset.q); });
+document.addEventListener("click", e => { if (e.target.closest("[data-act=jamChat]")) { e.preventDefault(); e.stopPropagation(); jamChatOpen(); } }, true);
 // join from a link (?jam=CODE), or rejoin the session this phone was in
 (async () => {
   let c = ""; try { c = (new URLSearchParams(location.search).get("jam") || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); } catch (e) {}
@@ -1486,5 +1586,5 @@ renderHome = function () { rawRenderHome(); if (!jamOn()) return; const tmp = do
   }
   if (saved && saved.code) jamJoin(saved.code, true);
 })();
-window.__jam = { get jam() { return jam; }, get off() { return jamOff; }, exp: () => jam && jamExp(jam.st), check: jamCheck };
+window.__jam = { get jam() { return jam; }, get off() { return jamOff; }, exp: () => jam && jamExp(jam.st), check: jamCheck, get chat() { return jamMsgs; }, get unread() { return jamUnread; } };
 })();

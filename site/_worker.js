@@ -1015,6 +1015,8 @@ function jamDb(env) {
   if (!jamReady) jamReady = d.batch([
     d.prepare("CREATE TABLE IF NOT EXISTS jam (code TEXT PRIMARY KEY, st TEXT, rev INTEGER, created INTEGER, upd INTEGER)"),
     d.prepare("CREATE TABLE IF NOT EXISTS jamm (code TEXT, mid TEXT, name TEXT, seen INTEGER, joined INTEGER, PRIMARY KEY (code, mid))"),
+    d.prepare("CREATE TABLE IF NOT EXISTS jamc (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, mid TEXT, name TEXT, txt TEXT, ts INTEGER)"),
+    d.prepare("CREATE INDEX IF NOT EXISTS jamc_code ON jamc (code, id)"),
   ]).catch(e => { jamReady = null; throw e; });
   return jamReady.then(() => d);
 }
@@ -1039,7 +1041,15 @@ function jamApply(st, a, who, now) { // returns true if the state changed
   if (t === "play") { if (!st.song) return false; st.pos = a.pos != null && isFinite(+a.pos) ? Math.max(0, +a.pos) : cur; st.at = now; st.playing = true; ev("play"); return true; }
   if (t === "pause") { if (!st.song) return false; st.pos = a.pos != null && isFinite(+a.pos) ? Math.max(0, +a.pos) : cur; st.at = now; st.playing = false; ev("pause"); return true; }
   if (t === "seek") { if (!st.song || !isFinite(+a.pos)) return false; st.pos = Math.max(0, +a.pos); st.at = now; ev("seek", { from: Math.round(cur), to: Math.round(st.pos) }); return true; }
-  if (t === "song") { const s = jamTrack(a.track); if (!s) return false; st.queue = (st.queue || []).filter(x => x.id !== s.id); if (!st.queue.length && a.list) st.queue = jamList(a.list, 100).filter(x => x.id !== s.id); startSong(s, "song"); return true; }
+  if (t === "song") {
+    const s = jamTrack(a.track); if (!s) return false;
+    const lst = a.list ? jamList(a.list, 100).filter(x => x.id !== s.id) : null, ev2 = a.rq ? "station" : "song";
+    if (st.song && st.song.id === s.id && !(st.song.dur && cur > st.song.dur - 1.5)) { // the song already playing: keep its place (never back to 0:00)
+      if (lst && (a.rq || !(st.queue || []).length)) st.queue = lst;
+      st.pos = cur; st.at = now; st.playing = true; ev(ev2, { title: s.title, same: 1 }); return true;
+    }
+    st.queue = a.rq && lst ? lst : (st.queue || []).filter(x => x.id !== s.id); if (!st.queue.length && lst) st.queue = lst; startSong(s, ev2); return true;
+  }
   if (t === "next" || t === "ended") {
     if (t === "ended" && (!st.song || st.song.id !== String(a.id || ""))) return false; // someone already moved on
     let q = st.queue || []; if (!q.length) q = fillQ(a.fill);
@@ -1069,8 +1079,16 @@ async function jamRead(d, code, now) {
   const mem = (m.results || []).map(x => ({ m: x.mid, n: x.name, j: x.joined }));
   if (row.upd < now - JAM_TTL && !mem.length) return null;
   let st = {}; try { st = JSON.parse(row.st) || {}; } catch (e) {}
+  if (st.ended) return { ended: st.ended, rev: row.rev, st, mem: [] };
   return { rev: row.rev, st, mem };
 }
+const JAM_CHAT_MAX = 300;
+const jamChatClean = s => String(s ?? "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").trim().slice(0, JAM_CHAT_MAX);
+async function jamChatSince(d, code, k) { // newest 100 messages after id k, oldest first
+  const r = await d.prepare("SELECT id, mid, name, txt, ts FROM jamc WHERE code = ? AND id > ? ORDER BY id DESC LIMIT 100").bind(code, Math.max(0, Number(k) || 0)).all();
+  return (r.results || []).reverse().map(x => ({ i: x.id, m: x.mid, n: x.name, x: x.txt, t: x.ts }));
+}
+const jamGoneOut = x => J({ ok: false, gone: true, ended: x && x.ended ? { m: x.ended.m, n: x.ended.n, at: x.ended.at } : undefined, msg: x && x.ended ? `${x.ended.n} ne Listen Together band kar diya` : "Ye session khatam ho gaya ya code galat hai", now: Date.now() });
 const jamOut = (code, x, extra) => J(Object.assign({ ok: true, code, rev: x.rev, st: x.st, mem: x.mem, now: Date.now() }, extra || {}));
 async function jamRoute(p, req, env, u) {
   const now0 = Date.now();
@@ -1092,28 +1110,51 @@ async function jamRoute(p, req, env, u) {
     }
     if (!code2) return J({ ok: false, msg: "try again" }, 503);
     await d.prepare("INSERT OR REPLACE INTO jamm (code, mid, name, seen, joined) VALUES (?, ?, ?, ?, ?)").bind(code2, mid, name, now, now).run();
-    if (Math.random() < 0.2) { const old = now - JAM_TTL; try { await d.batch([d.prepare("DELETE FROM jam WHERE upd < ? AND code NOT IN (SELECT code FROM jamm WHERE seen > ?)").bind(old, old), d.prepare("DELETE FROM jamm WHERE seen < ?").bind(old)]); } catch (e) {} }
+    if (Math.random() < 0.2) { const old = now - JAM_TTL; try { await d.batch([d.prepare("DELETE FROM jam WHERE upd < ? AND code NOT IN (SELECT code FROM jamm WHERE seen > ?)").bind(old, old), d.prepare("DELETE FROM jamm WHERE seen < ?").bind(old), d.prepare("DELETE FROM jamc WHERE ts < ?").bind(old)]); } catch (e) {} }
     return jamOut(code2, await jamRead(d, code2, Date.now()));
   }
   if (!/^[A-Z0-9]{6}$/.test(code)) return J({ ok: false, gone: true, msg: "Code galat hai" });
   if (p === "/api/jam/get") {
     if (mid && (b.hb || u.searchParams.get("hb"))) { const x = await d.prepare("SELECT 1 AS k FROM jamm WHERE code = ? AND mid = ?").bind(code, mid).first(); if (x) await touch(); }
-    const x = await jamRead(d, code, Date.now()); if (!x) return J({ ok: false, gone: true, now: Date.now() });
-    const r = Number(u.searchParams.get("r") || b.r || 0);
-    if (r && r === x.rev) return J({ ok: true, code, rev: x.rev, same: 1, mem: x.mem, now: Date.now() });
-    return jamOut(code, x);
+    const x = await jamRead(d, code, Date.now()); if (!x || x.ended) return jamGoneOut(x);
+    const r = Number(u.searchParams.get("r") || b.r || 0), kq = u.searchParams.get("k");
+    const chat = kq != null && kq !== "" ? await jamChatSince(d, code, kq) : null, cx = chat && chat.length ? { chat } : {};
+    if (r && r === x.rev) return J(Object.assign({ ok: true, code, rev: x.rev, same: 1, mem: x.mem, now: Date.now() }, cx));
+    return jamOut(code, x, cx);
   }
   if (!mid) return J({ ok: false, msg: "bad member" }, 400);
   if (p === "/api/jam/join" && req.method === "POST") {
-    const x = await jamRead(d, code, Date.now()); if (!x) return J({ ok: false, gone: true, msg: "Ye session khatam ho gaya ya code galat hai" });
+    const x = await jamRead(d, code, Date.now()); if (!x || x.ended) return jamGoneOut(x);
     if (x.mem.length >= JAM_MAX && !x.mem.some(m => m.m === mid)) return J({ ok: false, full: true, msg: `Session full hai (${JAM_MAX} log)` });
     await touch();
-    return jamOut(code, await jamRead(d, code, Date.now()));
+    return jamOut(code, await jamRead(d, code, Date.now()), { chat: await jamChatSince(d, code, 0) });
+  }
+  if (p === "/api/jam/chat" && req.method === "POST") { // chat message from a member
+    const x = await jamRead(d, code, Date.now()); if (!x || x.ended) return jamGoneOut(x);
+    const txt = jamChatClean(b.x); if (!txt) return J({ ok: false, msg: "Khali message" });
+    const now = Date.now();
+    const last = await d.prepare("SELECT COUNT(*) AS n FROM jamc WHERE code = ? AND mid = ? AND ts > ?").bind(code, mid, now - 10e3).first();
+    if (last && last.n >= 12) return J({ ok: false, msg: "Thoda dheere 🙂 bahut tez message ho rahe hain" });
+    await d.batch([
+      d.prepare("INSERT INTO jamc (code, mid, name, txt, ts) VALUES (?, ?, ?, ?, ?)").bind(code, mid, name, txt, now),
+      d.prepare("DELETE FROM jamc WHERE code = ? AND id <= (SELECT id FROM jamc WHERE code = ? ORDER BY id DESC LIMIT 1 OFFSET 100)").bind(code, code),
+      d.prepare("INSERT INTO jamm (code, mid, name, seen, joined) VALUES (?, ?, ?, ?, ?) ON CONFLICT(code, mid) DO UPDATE SET seen = excluded.seen, name = excluded.name").bind(code, mid, name, now, now),
+    ]);
+    return J({ ok: true, chat: await jamChatSince(d, code, b.k), now: Date.now() });
+  }
+  if (p === "/api/jam/end" && req.method === "POST") { // Stop Listen Together for everyone
+    for (let k = 0; k < 5; k++) {
+      const x = await jamRead(d, code, Date.now()); if (!x || x.ended) return J({ ok: true, already: true });
+      const now = Date.now(), st = x.st; st.ended = { m: mid, n: name, at: now }; st.playing = false; st.ev = { t: "end" }; st.by = { m: mid, n: name };
+      const r = await d.prepare("UPDATE jam SET st = ?, rev = rev + 1, upd = ? WHERE code = ? AND rev = ?").bind(JSON.stringify(st), now, code, x.rev).run();
+      if (r.meta && r.meta.changes) { try { await d.batch([d.prepare("DELETE FROM jamm WHERE code = ?").bind(code), d.prepare("DELETE FROM jamc WHERE code = ?").bind(code)]); } catch (e) {} return J({ ok: true, now: Date.now() }); }
+    }
+    return J({ ok: false, msg: "busy" }, 409);
   }
   if (p === "/api/jam/leave" && req.method === "POST") { await d.prepare("DELETE FROM jamm WHERE code = ? AND mid = ?").bind(code, mid).run(); return J({ ok: true }); }
   if (p === "/api/jam/act" && req.method === "POST") {
     for (let k = 0; k < 5; k++) {
-      const x = await jamRead(d, code, Date.now()); if (!x) return J({ ok: false, gone: true });
+      const x = await jamRead(d, code, Date.now()); if (!x || x.ended) return jamGoneOut(x);
       const now = Date.now(), st = x.st;
       if (!jamApply(st, b.a || {}, { m: mid, n: name }, now)) return jamOut(code, x, { nochange: true });
       const r = await d.prepare("UPDATE jam SET st = ?, rev = rev + 1, upd = ? WHERE code = ? AND rev = ?").bind(JSON.stringify(st), now, code, x.rev).run();
