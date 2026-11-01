@@ -61,6 +61,10 @@ const small = u => u ? u.replace(/=w544-h544/, "=w226-h226") : u;
 const ytThumb = id => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
 let toastT;
 function toast(msg, ms) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), ms || 2200); }
+// ---- Deals (her Telegram deals channel) — small, dismissible, never blocking ----
+const DEALS_JOIN_DEFAULT = "https://t.me/bestdeal_shoppingonline";
+let deals = (() => { const c = store.get("dealsCache", null); return c && Array.isArray(c.items) ? c : { items: [], join: DEALS_JOIN_DEFAULT, at: 0 }; })();
+let dealIdx = 0, dealTimer = 0, dealLoading = false;
 async function api(path) { const r = await fetch(path); if (!r.ok) throw new Error(r.status); return r.json(); }
 const trackMap = new Map(); // id -> track, for click handlers
 function reg(list) { list.forEach(t => trackMap.set(t.id, t)); return list; }
@@ -101,7 +105,7 @@ function installCard() {
   return `<div class="install"><button data-act="hideInstall">×</button><b>Make it an app:</b> ${ios ? "tap the Share button <b>⎋</b> in Safari, then <b>Add to Home Screen</b>." : "open your browser menu and choose <b>Add to Home Screen</b> / <b>Install app</b>."} It opens full-screen, no ads, keeps playing when you lock your phone.</div>`;
 }
 function renderHome() {
-  let h = `<h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}`;
+  let h = `<h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}${dealsHomeHTML()}`;
   if (!navigator.onLine) h += NATIVE ? `<div class="install offline"><b>You're offline.</b> Your downloaded songs still play. <a data-open="offline" style="color:#fa2d48;font-weight:600">Open Downloaded ›</a></div>` : `<div class="install offline"><b>You're offline.</b> Dhun needs internet to play. Your downloaded songs are safe in Telegram.</div>`;
   if (recent.length) { bindList("recent", recent.slice(0, 20)); h += `<h2>Recently Played</h2><div class="car">${recent.slice(0, 20).map((t, i) => tileHTML(t, i, "recent")).join("")}</div>`; }
   if (homeData) {
@@ -161,7 +165,7 @@ async function doSearch(text, kind) {
   s.loading = false; if (curTab === "search") renderSearch();
 }
 
-const FOOTER = () => `<div class="dFoot"><img src="/dhun-mark.png" alt="" width="26" height="32"><div class="dfGrid"><span class="dfR">Support</span><span class="dfAmp">&amp;</span><span class="dfL">Love 💖</span><span></span><span class="dfSigCell"><span class="dfSig">Mavi</span></span><span></span></div><a class="dfBtn" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}Contact us</a></div>`;
+const FOOTER = () => `<div class="dhunFoot"><img src="/dhun-mark.png" alt="Dhun" width="30" height="30"><div class="f0">Created with</div><div class="f1">Support &amp; Love</div><div class="sig">Mavi 💖</div><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>Contact us</span></a></div>`;
 function renderLibrary() {
   if (subView === "settings") return renderSettings();
   if (subView) return renderPlaylistView(subView);
@@ -176,7 +180,7 @@ function renderLibrary() {
   if (playlists.length) {
     h += `<h2>Playlists</h2><div class="grid">${playlists.map(pl => `<button class="tile" data-open="${esc(pl.id)}">${plArtHTML(pl)}<div class="t1">${esc(pl.name)}</div><div class="t2">${pl.tracks.length} song${pl.tracks.length === 1 ? "" : "s"}</div></button>`).join("")}</div>`;
   } else h += `<div class="empty">Make a playlist and add songs from any “···” menu.</div>`;
-  h += FOOTER();
+  h += dealsJoinHTML() + FOOTER();
   view.innerHTML = h;
 }
 function dlTracks() { return Object.values(dlIdx).sort((a, b) => b.at - a.at).map(x => x.t); }
@@ -235,8 +239,8 @@ function renderSettings() {
     <div class="bands${eqOn ? "" : " off"}">${EQF.map((f, i) => `<div class="band"><span>${f >= 1000 ? f / 1000 + "k" : f}</span><input type="range" min="-12" max="12" step="1" value="${eqGains[i]}" data-band="${i}"><b id="bv${i}">${eqGains[i] > 0 ? "+" : ""}${eqGains[i]}</b></div>`).join("")}</div>
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
-  <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button></div>
-  ${NATIVE ? `<div class="setCard" style="margin-top:18px"><button class="setRow" data-act="updCheck"><span><b>Check for updates</b><small>Dhun app v${esc(String((appVer && appVer.versionName) || "…"))}</small></span>${ICON.dl}</button></div>` : ""}<div class="setNote" style="margin:14px 20px 0;text-align:center">Dhun · free, no ads</div>${FOOTER()}`;
+  <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button><a class="dealRow" href="${esc(deals.join || DEALS_JOIN_DEFAULT)}" target="_blank" rel="noopener"><i class="dealEmoji">🛍️</i><span>Join Deals channel <small class="sub">Daily deals</small></span></a></div>
+  ${NATIVE ? `<div class="setCard" style="margin-top:18px"><button class="setRow" data-act="updCheck"><span><b>Check for updates</b><small>Dhun app v${esc(String((appVer && appVer.versionName) || "…"))}</small></span>${ICON.dl}</button></div>` : ""}${FOOTER()}`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -1099,4 +1103,62 @@ if (UPD) {
 }
 window.__upd = { updNewer, updUrlOk, updCheck, get state() { return updState; } };
 rerender(); syncPlay();
+// ---- Deals UI ----
+function dealsHidden() { return (store.get("dealsHideUntil", 0) || 0) > Date.now(); }
+function dealHref(d) { const u = String((d && d.url) || ""); return /^https:\/\//.test(u) ? u : (deals.join || DEALS_JOIN_DEFAULT); }
+function dealImg(d, cls) { return d && d.img && /^https:\/\//.test(d.img) ? `<img class="${cls}" src="${esc(d.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('i'),{className:'${cls} ph',textContent:'🛍️'}))">` : `<i class="${cls} ph">🛍️</i>`; }
+function dealCur() { const it = deals.items || []; return it.length ? it[dealIdx % it.length] : null; }
+function dealsHomeHTML() {
+  if (dealsHidden() || !navigator.onLine || !(deals.items || []).length) return "";
+  const d = dealCur();
+  return `<div id="dealCard" class="dealCard"><a class="dcLink" href="${esc(dealHref(d))}" target="_blank" rel="noopener">${dealImg(d, "dcImg")}<span class="dcBody"><b>🔥 Deals</b><span class="dcT">${esc(d.text)}</span></span></a><button class="dcX" data-deals-x aria-label="Hide deals">✕</button></div>`;
+}
+function dealsJoinHTML() {
+  const join = deals.join || DEALS_JOIN_DEFAULT, d = navigator.onLine ? dealCur() : null;
+  return `<div class="dealsJoin"><div class="djHead"><i class="djIcon">🛍️</i><span><b>Deals channel</b><small>Best shopping deals, daily · on Telegram</small></span></div>${d ? `<div class="djList"><a id="djOne" class="djOne" href="${esc(dealHref(d))}" target="_blank" rel="noopener">${dealImg(d, "djImg")}<span class="djT">${esc(d.text)}</span></a></div>` : ""}<a class="djBtn" href="${esc(join)}" target="_blank" rel="noopener">${TGICON}<span>Join Deals channel 🛍️</span></a></div>`;
+}
+function dealsTick() {
+  const el = document.getElementById("dealTick"); if (!el) return;
+  const d = dealCur(), show = !!d && !dealsHidden() && navigator.onLine;
+  el.classList.toggle("hidden", !show); document.body.classList.toggle("hasTick", show);
+  if (!show) return;
+  const a = el.querySelector("a"); a.href = dealHref(d); el.querySelector(".dtT").textContent = d.text;
+}
+function dealsRotate() {
+  if (document.hidden || !navigator.onLine || (deals.items || []).length < 2) return;
+  if (dealsHidden() && !document.getElementById("djOne")) return;
+  dealIdx = (dealIdx + 1) % deals.items.length;
+  const d = dealCur(), card = document.getElementById("dealCard"), tick = document.getElementById("dealTick"), one = document.getElementById("djOne");
+  [card, tick, one].forEach(x => x && x.classList.add("fade"));
+  setTimeout(() => {
+    if (card && card.isConnected) { const l = card.querySelector(".dcLink"); l.href = dealHref(d); const old = l.querySelector(".dcImg"); if (old) old.outerHTML = dealImg(d, "dcImg"); card.querySelector(".dcT").textContent = d.text; card.classList.remove("fade"); }
+    if (one && one.isConnected) { one.href = dealHref(d); const old = one.querySelector(".djImg"); if (old) old.outerHTML = dealImg(d, "djImg"); one.querySelector(".djT").textContent = d.text; one.classList.remove("fade"); }
+    dealsTick(); if (tick) tick.classList.remove("fade");
+  }, 220);
+}
+function dealsHide() {
+  store.set("dealsHideUntil", Date.now() + 24 * 3600e3);
+  const c = document.getElementById("dealCard"); if (c) c.remove();
+  dealsTick();
+}
+function dealsLoad() {
+  if (dealLoading || !navigator.onLine || Date.now() - (deals.at || 0) < 20 * 60e3) return;
+  dealLoading = true;
+  fetch(API_BASE + "/api/deals").then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => {
+    if (!j || !Array.isArray(j.items)) return;
+    const had = (deals.items || []).length;
+    deals = { items: j.items.filter(d => d && d.text).slice(0, 10), join: /^https:\/\/t\.me\/\w+$/.test(j.join || "") ? j.join : DEALS_JOIN_DEFAULT, at: Date.now() };
+    store.set("dealsCache", deals);
+    if (dealIdx >= deals.items.length) dealIdx = 0;
+    dealsTick();
+    if (!had && deals.items.length && ((curTab === "library" && !subView) || (curTab === "home" && performance.now() < 3000 && !document.getElementById("dealCard") && view.scrollTop < 40))) rerender(); // first-ever load only; later visits render from cache with no jump
+  }).catch(() => {}).finally(() => dealLoading = false);
+}
+document.addEventListener("click", e => { const x = e.target.closest && e.target.closest("[data-deals-x]"); if (x) { e.preventDefault(); e.stopPropagation(); dealsHide(); } }, true);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) dealsLoad(); });
+window.addEventListener("online", () => { dealsTick(); dealsLoad(); });
+window.addEventListener("offline", () => { dealsTick(); });
+dealsTick(); dealsLoad();
+dealTimer = setInterval(dealsRotate, 6000);
+setInterval(dealsLoad, 5 * 60e3);
 })();
