@@ -669,7 +669,7 @@ async function userData(env, ctx, body) {
   if (body.op === "put") {
     const ch = {};
     for (const k of SYNC_KEYS) if (Array.isArray(body[k])) {
-      const j = JSON.stringify(body[k]); if (j.length > 400000) return J({ error: "too big: " + k }, 413);
+      const j = JSON.stringify(body[k]); if (j.length > (k === "playlists" ? 1500000 : 400000)) return J({ error: "too big: " + k }, 413);
       ch[k] = j; cur[k] = body[k];
     }
     if (!Object.keys(ch).length) return J({ error: "nothing to save" }, 400);
@@ -762,6 +762,171 @@ async function getDeals(env, ctx) {
 }
 
 
+// ---------- Playlist import: public Spotify / Apple Music links -> track list; JioSaavn matching ----------
+const IMP_MAX = 300;
+const DESK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+class ImpErr extends Error { constructor(code, msg) { super(msg || code); this.code = code; } }
+function impParse(raw) {
+  let s = String(raw || "").trim();
+  const sm = s.match(/spotify:(playlist|album):([A-Za-z0-9]{10,40})/); if (sm) return { src: "spotify", kind: sm[1], id: sm[2] };
+  const m = s.match(/https?:\/\/[^\s<>"']+/); if (m) s = m[0]; else if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(s)) s = "https://" + s;
+  let u; try { u = new URL(s); } catch (e) { return null; }
+  const h = u.hostname.toLowerCase();
+  if (/(^|\.)spotify\.link$/.test(h) || /(^|\.)spotify\.app\.link$/.test(h) || h === "spoti.fi") return { src: "spotify", short: u.href };
+  if (/(^|\.)spotify\.com$/.test(h)) {
+    const mm = u.pathname.match(/\/(playlist|album)\/([A-Za-z0-9]{10,40})/); if (mm) return { src: "spotify", kind: mm[1], id: mm[2] };
+    if (/\/(track|artist|episode|show)\//.test(u.pathname)) return { src: "spotify", bad: "kind" };
+    return null;
+  }
+  if (/(^|\.)music\.apple\.com$/.test(h) || h === "itunes.apple.com") {
+    const mm = u.pathname.match(/^\/([a-z]{2})\/(playlist|album)\/(?:[^/]+\/)?(pl\.[A-Za-z0-9._-]+|\d{3,})/i);
+    if (mm) return { src: "apple", sf: mm[1].toLowerCase(), kind: mm[2].toLowerCase(), id: mm[3] };
+    const m2 = u.pathname.match(/^\/(playlist|album)\/(?:[^/]+\/)?(pl\.[A-Za-z0-9._-]+|\d{3,})/i);
+    if (m2) return { src: "apple", sf: "in", kind: m2[1].toLowerCase(), id: m2[2] };
+    if (/\/(song|artist|station|music-video)\//.test(u.pathname)) return { src: "apple", bad: "kind" };
+    return null;
+  }
+  return null;
+}
+const impArtists = s => String(s || "").replace(/\u00a0/g, " ").trim();
+async function spResolveShort(href) {
+  const r = await tfetch(href, { headers: { "user-agent": DESK_UA }, redirect: "follow" }, 8000);
+  const fin = impParse(r.url); if (fin && fin.id) return fin;
+  const body = await r.text(); const m = body.match(/https:\/\/open\.spotify\.com\/(playlist|album)\/([A-Za-z0-9]{10,40})/);
+  if (m) return { src: "spotify", kind: m[1], id: m[2] };
+  throw new ImpErr("bad_url", "Short link khul nahi raha");
+}
+async function spImport(kind, id) {
+  const r = await tfetch(`https://open.spotify.com/embed/${kind}/${id}`, { headers: { "user-agent": DESK_UA, "accept-language": "en" } }, 9000);
+  if (r.status === 404) throw new ImpErr("private");
+  if (!r.ok) throw new ImpErr("upstream", "Spotify " + r.status);
+  const html = await r.text();
+  const m = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+  if (!m) throw new ImpErr("upstream", "Spotify page changed");
+  const pp = (JSON.parse(m[1]).props || {}).pageProps || {};
+  const st = pp.state || {}, e = st.data && st.data.entity;
+  if (!e || pp.status === 404) throw new ImpErr("private");
+  const tracks = (e.trackList || []).filter(t => t && t.title && (!t.entityType || t.entityType === "track")).map(t => ({ title: t.title, artists: impArtists(t.subtitle), dur: Math.round((t.duration || 0) / 1000) }));
+  const srcs = (e.coverArt && e.coverArt.sources) || [];
+  const cover = (srcs.slice().sort((a, b) => (b.width || 0) - (a.width || 0))[0] || {}).url || "";
+  const out = { source: "spotify", kind, id, name: e.name || e.title || "Spotify playlist", owner: impArtists(e.subtitle), cover, tracks, total: tracks.length };
+  const tok = st.settings && st.settings.session && st.settings.session.accessToken;
+  if (kind === "playlist" && tracks.length >= 100 && tok) { // embed shows 100 — page the rest through the web player's public query (fail soft)
+    try {
+      for (let off = 100; off < IMP_MAX; off += 100) {
+        const qs = new URLSearchParams({ operationName: "fetchPlaylist", variables: JSON.stringify({ uri: `spotify:playlist:${id}`, offset: off, limit: 100 }), extensions: JSON.stringify({ persistedQuery: { version: 1, sha256Hash: "76849d094f1ac9870ac9dbd5731bde5dc228264574b5f5d8cbc8f5a8f2f26116" } }) });
+        const pr = await tfetch("https://api-partner.spotify.com/pathfinder/v1/query?" + qs, { headers: { authorization: "Bearer " + tok, "user-agent": DESK_UA, "app-platform": "WebPlayer" } }, 9000);
+        if (!pr.ok) break;
+        const pj = await pr.json(); const c = pj && pj.data && pj.data.playlistV2 && pj.data.playlistV2.content; if (!c) break;
+        if (c.totalCount) out.total = c.totalCount;
+        const items = (c.items || []).map(x => x && x.itemV2 && x.itemV2.data).filter(d => d && d.name && d.__typename === "Track");
+        for (const d of items) out.tracks.push({ title: d.name, artists: ((d.artists && d.artists.items) || []).map(a => a.profile && a.profile.name).filter(Boolean).join(", "), dur: Math.round(((d.trackDuration && d.trackDuration.totalMilliseconds) || 0) / 1000) });
+        if ((c.items || []).length < 100) break;
+      }
+    } catch (e2) {}
+  }
+  return out;
+}
+async function amToken(env, fresh) {
+  const k = "amtok"; if (!fresh) { const h = memGet(k); if (h) return h; }
+  let d = null; try { d = await db(env); } catch (e) {}
+  if (!fresh && d) { try { const v = await kvGet(d, k); if (v) { const o = JSON.parse(v); if (o.exp > Date.now() / 1000 + 3600) { memSet(k, o.t, 3600); return o.t; } } } catch (e) {} }
+  const r = await tfetch("https://music.apple.com/us/browse", { headers: { "user-agent": DESK_UA } }, 9000); const html = await r.text();
+  const js = (html.match(/\/assets\/index[^"'\s]*?\.js/) || [])[0]; if (!js) throw new ImpErr("upstream", "Apple Music page changed");
+  const src = await (await tfetch("https://music.apple.com" + js, { headers: { "user-agent": DESK_UA } }, 12000)).text();
+  const i = src.indexOf('"eyJ'); if (i < 0) throw new ImpErr("upstream", "Apple Music token not found");
+  const t = src.slice(i + 1, src.indexOf('"', i + 1));
+  let exp = Date.now() / 1000 + 7 * 86400; try { exp = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).exp || exp; } catch (e) {}
+  memSet(k, t, 3600); if (d) { try { await kvSet(d, k, JSON.stringify({ t, exp })); } catch (e) {} }
+  return t;
+}
+async function amGet(env, path) {
+  for (let i = 0; i < 2; i++) {
+    const tok = await amToken(env, i > 0);
+    const r = await tfetch("https://amp-api.music.apple.com" + path, { headers: { authorization: "Bearer " + tok, origin: "https://music.apple.com", "user-agent": DESK_UA } }, 9000);
+    if (r.status === 401 || r.status === 403) continue;
+    if (r.status === 404) throw new ImpErr("private");
+    if (!r.ok) throw new ImpErr("upstream", "Apple Music " + r.status);
+    return r.json();
+  }
+  throw new ImpErr("upstream", "Apple Music refused");
+}
+async function amImport(env, sf, kind, id) {
+  const typ = kind === "album" ? "albums" : "playlists";
+  const j = await amGet(env, `/v1/catalog/${sf}/${typ}/${encodeURIComponent(id)}?include=tracks&l=en-GB`);
+  const d = j && j.data && j.data[0]; if (!d) throw new ImpErr("private");
+  const a = d.attributes || {}, rel = (d.relationships && d.relationships.tracks) || {};
+  const map = x => { const t = x.attributes || {}; return { title: t.name, artists: t.artistName || "", dur: Math.round((t.durationInMillis || 0) / 1000), album: t.albumName || "" }; };
+  const tracks = (rel.data || []).filter(x => x && x.attributes && x.attributes.name).map(map);
+  let next = rel.next;
+  while (next && tracks.length < IMP_MAX) {
+    try { const p = await amGet(env, next + (next.includes("?") ? "&" : "?") + "l=en-GB"); (p.data || []).filter(x => x && x.attributes && x.attributes.name).forEach(x => tracks.push(map(x))); next = p.next; } catch (e) { break; }
+  }
+  const art = a.artwork && a.artwork.url ? a.artwork.url.replace("{w}", "500").replace("{h}", "500").replace("{f}", "jpg").replace("{c}", "cc") : "";
+  return { source: "apple", kind, id, name: a.name || "Apple Music playlist", owner: a.curatorName || a.artistName || "", cover: art, tracks, total: a.trackCount || tracks.length };
+}
+async function impFetch(env, raw) {
+  let p = impParse(raw);
+  if (!p) throw new ImpErr("bad_url");
+  if (p.bad) throw new ImpErr("kind");
+  if (p.short) p = await spResolveShort(p.short);
+  const key = `imp:${p.src}:${p.kind}:${p.id}`; const hit = memGet(key); if (hit) return hit;
+  const o = p.src === "spotify" ? await spImport(p.kind, p.id) : await amImport(env, p.sf, p.kind, p.id);
+  if (!o.tracks.length) throw new ImpErr("empty");
+  o.tracks = o.tracks.slice(0, IMP_MAX); o.capped = o.total > o.tracks.length;
+  memSet(key, o, 600);
+  return o;
+}
+const IMP_MSG = { bad_url: "Ye Spotify / Apple Music playlist link nahi lag raha. Playlist → Share → Copy link karke paste karo.", kind: "Ye ek gaane/artist ka link hai. Poori playlist ya album ka link paste karo.", private: "Playlist nahi khuli. Playlist public karo (share link) aur dobara try karo.", empty: "Is playlist me koi gaana nahi mila.", upstream: "Abhi playlist load nahi ho payi, thodi der me try karo." };
+// --- matching ---
+const impNorm = s => String(s || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " and ").replace(/[’'`]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+function impCleanTitle(s) {
+  return String(s || "")
+    .replace(/\s*[\(\[][^\)\]]*\b(from|feat\.?|ft\.?|featuring|with|remaster(ed)?|version|edit|mix|live|lofi|lo-fi|slowed|reverb|sped up|bonus|explicit|clean|original|soundtrack|ost)\b[^\)\]]*[\)\]]/gi, " ")
+    .replace(/\s+-\s+(from|feat|ft|remaster|remastered|\d{4} remaster|live|radio edit|single version|.*\bversion\b).*$/i, " ")
+    .replace(/\s+(feat\.?|ft\.?|featuring)\s.+$/i, " ")
+    .replace(/\s{2,}/g, " ").trim() || String(s || "").trim();
+}
+const impToks = s => impNorm(s).split(" ").filter(Boolean);
+function impDice(a, b) {
+  const A = impToks(a), B = impToks(b); if (!A.length || !B.length) return 0;
+  const sa = A.join(""), sb = B.join(""); if (sa === sb) return 1;
+  const big = x => { const m = new Map(); for (let i = 0; i < x.length - 1; i++) { const g = x.slice(i, i + 2); m.set(g, (m.get(g) || 0) + 1); } return m; };
+  const ma = big(sa), mb = big(sb); let inter = 0; for (const [g, n] of ma) inter += Math.min(n, mb.get(g) || 0);
+  const tot = Math.max(1, sa.length - 1 + sb.length - 1); let d = 2 * inter / tot;
+  if (sa.length >= 4 && sb.length >= 4 && (sa.startsWith(sb) || sb.startsWith(sa))) d = Math.max(d, 0.85);
+  return d;
+}
+const impArtList = s => String(s || "").split(/\s*(?:,|&|\band\b|\bx\b|\bfeat\.?|\bft\.?|\bwith\b|\/)\s*/i).map(impNorm).filter(x => x.length > 1);
+function impScore(t, c) {
+  const ts = impDice(impCleanTitle(t.title), impCleanTitle(c.title));
+  const want = impArtList(t.artists), have = impNorm(c.artist + " " + (c.album || ""));
+  let as = 0.5; if (want.length) { const hit = want.filter(w => have.includes(w) || w.split(" ").filter(p => p.length > 2).some(p => have.split(" ").includes(p))).length; as = hit / want.length; }
+  let ds = 0; if (t.dur && c.dur) { const df = Math.abs(t.dur - c.dur); ds = df <= 4 ? 0.12 : df <= 12 ? 0.05 : df > 40 ? -0.2 : 0; }
+  let sc = 0.62 * ts + 0.3 * as + ds;
+  if (want.length && as === 0) sc -= (ds >= 0.12 && ts >= 0.95) ? 0.22 : 0.3; // same title, different singer = usually a cover / another song
+  const vt = impNorm(t.title), vc = impNorm(c.title); for (const w of ["unplugged", "remix", "lofi", "slowed", "reprise", "cover", "instrumental", "karaoke", "acoustic", "female", "sad", "extended", "mashup", "live", "8d"]) { const re = new RegExp("\\b" + w + "\\b"); if (re.test(vc) !== re.test(vt)) sc -= 0.12; }
+  return sc;
+}
+async function impMatchOne(t) {
+  const title = impCleanTitle(t.title), art1 = impArtList(t.artists)[0] || "";
+  const mk = "impm:" + impNorm(title) + "|" + art1 + "|" + (t.dur || 0); const hit = memGet(mk); if (hit !== null && hit !== undefined) return hit.t;
+  let best = null, bs = -1;
+  const consider = list => { for (const c of list || []) { const s = impScore(t, c); if (s > bs) { bs = s; best = c; } } };
+  try { consider(await svSearch(`${title} ${String(t.artists || "").split(",")[0]}`.trim(), 8)); } catch (e) {}
+  if (bs < 0.78) { try { consider(await svSearch(title, 10)); } catch (e) {} }
+  const arts = String(t.artists || "").split(/\s*(?:,|&)\s*/).filter(Boolean);
+  if (bs < 0.7 && arts.length > 1) { try { consider(await svSearch(`${title} ${arts[1]}`, 8)); } catch (e) {} }
+  const out = bs >= 0.55 ? { ...best, score: Math.round(bs * 100) / 100 } : null;
+  memSet(mk, { t: out }, 3600);
+  return out;
+}
+async function impMatch(tracks) {
+  const list = (Array.isArray(tracks) ? tracks : []).slice(0, 10).map(t => ({ title: String((t && t.title) || "").slice(0, 200), artists: String((t && t.artists) || "").slice(0, 300), dur: +(t && t.dur) || 0 }));
+  return Promise.all(list.map(t => t.title ? impMatchOne(t).catch(() => null) : null));
+}
+async function impBody(req) { try { const t = await req.text(); return t ? JSON.parse(t) : {}; } catch (e) { return {}; } }
+
 export default {
   async fetch(req, env, ctx) {
     loadConfig(env, req);
@@ -772,6 +937,15 @@ export default {
         let v = {}; try { const r = await env.ASSETS.fetch(new Request(new URL("/app-version.json", u), { headers: { "cache-control": "no-cache" } })); v = await r.json(); } catch (e) {}
         return new Response(JSON.stringify({ versionCode: Number(v.versionCode) || 0, versionName: String(v.versionName || ""), apkUrl: String(v.apkUrl || SITE + "dhun.apk"), notes: String(v.notes || ""), force: !!v.force, sha256: v.sha256 || "", bytes: Number(v.bytes || v.size) || 0, ...(Number(v.size) > 0 ? { size: Number(v.size) } : {}) }), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache, no-store, must-revalidate", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS" } });
       }
+      if (p === "/api/import") { // public Spotify / Apple Music playlist -> {name, cover, tracks:[{title, artists, dur}]}
+        const b = req.method === "POST" ? await impBody(req) : {}; const link = String(b.url || u.searchParams.get("url") || "").slice(0, 600);
+        try { const o = await impFetch(env, link); return J({ ok: true, ...o }); }
+        catch (e) { const code = (e && e.code) || "upstream"; return J({ ok: false, error: code, msg: IMP_MSG[code] || IMP_MSG.upstream, detail: code === "upstream" ? String((e && e.message) || e).slice(0, 120) : undefined }, 200); }
+      }
+      if (p === "/api/import/match") { // POST {tracks:[{title, artists, dur}] (max 10)} -> {results:[track|null]}
+        const b = await impBody(req); return J({ results: await impMatch(b.tracks) });
+      }
+      if (req.method === "OPTIONS" && p.startsWith("/api/import")) return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "86400" } });
       if (p === "/api/deals") { let o; try { o = await getDeals(env, ctx); } catch (e) { o = { channel: dealsChannel(env), join: "https://t.me/" + dealsChannel(env), items: [] }; } return J(o, 200, 300); }
       if (p === "/dhun.apk") { const r = await env.ASSETS.fetch(new Request(new URL("/files/dhun-app.apk", u), req)); const h = new Headers(r.headers); h.set("content-type", "application/vnd.android.package-archive"); h.set("content-disposition", 'attachment; filename="Dhun.apk"'); h.set("cache-control", "no-cache"); h.set("access-control-allow-origin", "*"); return new Response(r.body, { status: r.status, headers: h }); }
       if (p === "/api/search") {

@@ -30,6 +30,8 @@ const ICON = {
   pl: '<svg viewBox="0 0 24 24"><path d="M3 6h12v2H3zm0 4h12v2H3zm0 4h8v2H3zm14-4h2v4h4v2h-4v4h-2v-4h-4v-2h4z"/></svg>',
 };
 
+const SPICON = '<svg class="spI" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#1ed760"/><path d="M17.3 16.6a.75.75 0 01-1 .25c-2.8-1.7-6.3-2.1-10.4-1.2a.75.75 0 11-.33-1.46c4.5-1 8.4-.6 11.5 1.3.35.21.46.67.24 1.1zm1.4-3.2a.94.94 0 01-1.3.31c-3.2-2-8.1-2.5-11.9-1.4a.94.94 0 11-.54-1.8c4.3-1.3 9.7-.7 13.4 1.6.44.27.58.85.31 1.3zm.13-3.3C15 7.8 8.6 7.6 5 8.7a1.13 1.13 0 11-.66-2.16C8.5 5.3 15.6 5.5 20 8.2a1.13 1.13 0 11-1.16 1.94z" fill="#000"/></svg>';
+const AMICON = '<svg class="amI" viewBox="0 0 24 24"><defs><linearGradient id="amG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fa5c74"/><stop offset="1" stop-color="#fa233b"/></linearGradient></defs><rect width="24" height="24" rx="6" fill="url(#amG)"/><path d="M16.6 5.2l-6.7 1.4c-.3.07-.5.33-.5.64v7.5a2.3 2.3 0 00-1.2-.2c-1.2.1-2.1.9-2.1 1.9 0 1.1 1.1 1.8 2.3 1.6 1.1-.15 1.9-1 1.9-2V10l5.4-1.15v4.6a2.3 2.3 0 00-1.2-.2c-1.2.1-2.1.9-2.1 1.9 0 1.1 1.1 1.8 2.3 1.6 1.1-.15 1.9-1 1.9-2V5.8c0-.4-.37-.68-.76-.6z" fill="#fff"/></svg>';
 // ---------- storage ----------
 const store = {
   get(k, d) { try { const v = localStorage.getItem("m_" + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -98,7 +100,7 @@ function installCard() {
   return `<div class="install"><button data-act="hideInstall">×</button><b>Make it an app:</b> ${ios ? "tap the Share button <b>⎋</b> in Safari, then <b>Add to Home Screen</b>." : "open your browser menu and choose <b>Add to Home Screen</b> / <b>Install app</b>."} It opens full-screen, no ads, keeps playing when you lock your phone.</div>`;
 }
 function renderHome() {
-  let h = `<div class="brandBar"><img src="/logo-h.webp?v=13b" alt="Dhun" width="104" height="48"></div><h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}${dealsHomeHTML()}`;
+  let h = `<div class="brandBar"><img src="/logo-h.webp?v=15" alt="Dhun" width="104" height="48"></div><h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}${dealsHomeHTML()}`;
   if (!navigator.onLine) h += `<div class="install offline"><b>You're offline.</b> Dhun needs internet to play. Your downloaded songs are safe in Telegram.</div>`;
   if (recent.length) { bindList("recent", recent.slice(0, 20)); h += `<h2>Recently Played</h2><div class="car">${recent.slice(0, 20).map((t, i) => tileHTML(t, i, "recent")).join("")}</div>`; }
   if (homeData) {
@@ -166,10 +168,11 @@ function renderLibrary() {
     <button data-open="liked">${ICON.heart}<span>Liked Songs <small class="sub">${liked.length}</small></span></button>
     <button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${tgMe.linked ? `${nd} song${nd === 1 ? "" : "s"}${tgMe.username ? " · @" + esc(tgMe.username) : ""}` : "Not connected"}${dlJobs.size ? ` · ${dlJobs.size} sending` : ""}</small></span></button>
     <button data-open="recent">${ICON.clock}<span>Recently Played</span></button>
-    <button data-act="newPlaylist">${ICON.plus}<span>New Playlist…</span></button></div>`;
+    <button data-act="newPlaylist">${ICON.plus}<span>New Playlist…</span></button>
+    <button data-act="importPl" class="impRow"><i class="impLogos">${SPICON}${AMICON}</i><span>Import Playlist <small class="sub">Spotify · Apple Music</small></span></button></div>`;
   if (playlists.length) {
     h += `<h2>Playlists</h2><div class="grid">${playlists.map(pl => `<button class="tile" data-open="${esc(pl.id)}">${plArtHTML(pl)}<div class="t1">${esc(pl.name)}</div><div class="t2">${pl.tracks.length} song${pl.tracks.length === 1 ? "" : "s"}</div></button>`).join("")}</div>`;
-  } else h += `<div class="empty">Make a playlist and add songs from any “···” menu.</div>`;
+  }
   h += dealsJoinHTML() + footHTML();
   view.innerHTML = h;
 }
@@ -201,7 +204,7 @@ function dlInfoHTML() {
 }
 function segHTML(k, opts) { return `<div class="seg">${opts.map(v => `<button data-act="q" data-k="${k}" data-v="${v}" class="${cfg[k] === v ? "on" : ""}">${QNAME[v]}<small>${v}</small></button>`).join("")}</div>`; }
 function footHTML() {
-  return `<div class="dhunFoot"><img src="/dhun-mark.webp?v=13b" alt="Dhun" width="30" height="30"><div class="f0">Created with</div><div class="f1">Support &amp; Love</div><div class="sig">Mavi💖</div><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>Contact us</span></a></div>`;
+  return `<div class="dhunFoot"><img src="/dhun-mark.webp?v=15" alt="Dhun" width="30" height="30"><div class="f0">Created with</div><div class="f1">Support &amp; Love</div><div class="sig">Mavi💖</div><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>Contact us</span></a></div>`;
 }
 function renderSettings() {
   const auto = autoNet(), c = conn(), cell = netKind() === "cell";
@@ -375,7 +378,7 @@ async function tgConnectSheet(why) {
   if (!tgCode) { try { const r = await post("/api/tg/new"); if (!r.code) throw 0; tgCode = r.code; tgBot = r.bot || tgBot; store.set("tgCode", tgCode); syncInit = false; store.set("syncInit", false); } catch (e) { return toast("Couldn't reach the server, try again"); } }
   const link = `https://t.me/${tgBot}?start=${tgCode}`;
   await new Promise(r => setTimeout(r, 60));
-  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=13b" alt="Dhun"><span class="x">⇄</span><div class="tgLogo">${TGICON}</div></div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
+  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=15" alt="Dhun"><span class="x">⇄</span><div class="tgLogo">${TGICON}</div></div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
     <div class="tgSteps">1. Tap <b>Open Telegram</b><br>2. Tap <b>Start</b> in the bot chat<br>3. Come back here — your library syncs and downloads start on their own</div>
     <a class="tgBtn" href="${esc(link)}" target="_blank" rel="noopener">${TGICON}Open Telegram</a>
     <button data-s="check">I've tapped Start ✓</button></div>`, { check: async () => { const ok = await tgRefresh(); if (ok) tgLinked(); else setTimeout(() => tgConnectSheet("Not connected yet — open Telegram and tap Start"), 60); } });
@@ -502,11 +505,11 @@ function tgNames(m) { m = m || {}; const first = realName(m.first) || realName(S
 function acctHTML(compact) {
   if (!tgMe.linked) return compact
     ? `<div class="acct off"><div class="acctTxt"><b>Sign in with Telegram</b><small>Save your likes & playlists to your own account, get them back on any phone</small></div><button data-act="acctConnect" class="tgB">${TGICON}Connect</button></div>`
-    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=13b" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
+    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=15" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
   const nm = tgNames(tgMe), who = esc(nm.first), handle = tgMe.username ? "@" + esc(tgMe.username) : (tgMe.uid ? "ID " + esc(tgMe.uid) : "");
   const st = syncBusy ? "Syncing…" : Object.keys(syncDirty).length ? (syncErr === "offline" ? "Offline, will sync later" : "Saving…") : syncAt ? `Synced ${ago(syncAt)}` : "Syncing…";
   if (compact) return `<button class="acct on" data-act="settings"><div class="acctTxt"><b>☁️ ${who}${handle ? ` <span class="acctAt">${handle}</span>` : ""}</b><small>${st} · ${liked.length} liked · ${playlists.length} playlist${playlists.length === 1 ? "" : "s"}</small></div></button>`;
-  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=13b" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>${who}</b><small>${handle ? handle + " · " : ""}Signed in with Telegram ✅</small></div></div>
+  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=15" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>${who}</b><small>${handle ? handle + " · " : ""}Signed in with Telegram ✅</small></div></div>
     <div class="setNote">☁️ ${st}<br>Your likes (${liked.length}), playlists (${playlists.length}), recently played and Telegram downloads (${Object.keys(dlIdx).length}) are saved to your account. Connect Telegram on any other phone to get them back.</div>
     <div class="btnRow" style="padding:10px 0 2px;margin:0"><button data-act="syncNow">Sync now</button><button data-act="tgOff" style="color:#ff453a">Log out</button></div></div>`;
 }
@@ -843,14 +846,15 @@ window.__m = { P, queue: () => queue, get audio() { return audio; }, doSearch, p
   eq() { const o = { on: eqOn, routed: eqRouted, ctx: actx && actx.state, gains: eqNodes.map(n => +n.gain.value.toFixed(2)), types: eqNodes.map(n => n.type), pre: preGain && +preGain.gain.value.toFixed(3) }; if (analyser) { const d = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(d); let sq = 0; for (const x of d) sq += x * x; o.rms = +Math.sqrt(sq / d.length).toFixed(4); } return o; } };
 rerender(); syncPlay();
 // ---- Deals UI ----
-function dealsHidden() { return (store.get("dealsHideUntil", 0) || 0) > Date.now(); }
+function dealsHidden() { return false; } // deals can no longer be closed (her 4:08 PM ask)
+try { localStorage.removeItem("m_dealsHideUntil"); } catch (e) {}
 function dealHref(d) { const u = String((d && d.url) || ""); return /^https:\/\//.test(u) ? u : (deals.join || DEALS_JOIN_DEFAULT); }
 function dealImg(d, cls) { return d && d.img && /^https:\/\//.test(d.img) ? `<img class="${cls}" src="${esc(d.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('i'),{className:'${cls} ph',textContent:'🛍️'}))">` : `<i class="${cls} ph">🛍️</i>`; }
 function dealCur() { const it = deals.items || []; return it.length ? it[dealIdx % it.length] : null; }
 function dealsHomeHTML() {
   if (dealsHidden() || !(deals.items || []).length) return "";
   const d = dealCur();
-  return `<div id="dealCard" class="dealCard"><a class="dcLink" href="${esc(dealHref(d))}" target="_blank" rel="noopener">${dealImg(d, "dcImg")}<span class="dcBody"><b>🔥 Deals</b><span class="dcT">${esc(d.text)}</span></span></a><button class="dcX" data-deals-x aria-label="Hide deals">✕</button></div>`;
+  return `<div id="dealCard" class="dealCard"><a class="dcLink" href="${esc(dealHref(d))}" target="_blank" rel="noopener">${dealImg(d, "dcImg")}<span class="dcBody"><b>🔥 Deals</b><span class="dcT">${esc(d.text)}</span></span></a></div>`;
 }
 function dealsJoinHTML() {
   const join = deals.join || DEALS_JOIN_DEFAULT, d = dealCur();
@@ -893,9 +897,88 @@ function dealsLoad() {
     if (!had && deals.items.length && ((curTab === "library" && !subView) || (curTab === "home" && performance.now() < 3000 && !document.getElementById("dealCard") && view.scrollTop < 40))) rerender(); // first-ever load only; later visits render from cache with no jump
   }).catch(() => {}).finally(() => dealLoading = false);
 }
-document.addEventListener("click", e => { const x = e.target.closest("[data-deals-x]"); if (x) { e.preventDefault(); e.stopPropagation(); dealsHide(); } }, true);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) dealsLoad(); });
 dealsTick(); dealsLoad();
 dealTimer = setInterval(dealsRotate, 6000);
 setInterval(dealsLoad, 5 * 60e3);
+// ---- Import playlist from Spotify / Apple Music (public link -> match on JioSaavn -> new Dhun playlist) ----
+const IMP_BASE = /(^|\.)tab\.bot$/.test(location.hostname) ? "" : "https://dhun.sites.tab.bot"; // the Android app has no own server
+let impJob = null; // { phase: "load"|"match"|"done"|"error", name, cover, source, total, done, found, missing:[], plId, msg }
+function impSheetHTML() {
+  const j = impJob;
+  let body;
+  if (!j || j.phase === "error") {
+    body = `<div class="impPaste"><input id="impUrl" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://open.spotify.com/playlist/…" value="${esc((j && j.url) || "")}">
+      <div class="impBtns">${navigator.clipboard && navigator.clipboard.readText ? `<button data-s="impPaste" class="impSec">Paste</button>` : ""}<button data-s="impGo" class="impPri">Import</button></div>
+      ${j && j.msg ? `<div class="impErr">${esc(j.msg)}</div>` : ""}
+      <div class="impHint">Spotify / Apple Music me playlist kholo → Share → <b>Copy link</b> → yahan paste karo. Playlist public honi chahiye.</div></div>`;
+  } else {
+    const pct = j.total ? Math.round((j.done / j.total) * 100) : 0;
+    const head = `<div class="impPl">${j.cover ? `<img src="${esc(j.cover)}" alt="" referrerpolicy="no-referrer">` : `<div class="impPh">${j.source === "apple" ? AMICON : SPICON}</div>`}<div><b>${esc(j.name || "Playlist")}</b><small>${j.source === "apple" ? "Apple Music" : j.source === "spotify" ? "Spotify" : ""}${j.total ? ` · ${j.total} songs` : ""}</small></div></div>`;
+    if (j.phase === "load") body = `<div class="impRun"><div class="impBig">Playlist khol rahe hain…</div><div class="impBar"><i class="indet"></i></div></div>`;
+    else if (j.phase === "match") body = `${head}<div class="impRun"><div class="impBig" id="impBig">${j.found}/${j.total} mile</div><div class="impBar"><i id="impFill" style="width:${pct}%"></i></div><div class="impSub" id="impSub">JioSaavn pe dhoondh rahe hain · ${j.done}/${j.total} check hue</div><div class="impSub">Sheet band kar do to bhi chalta rahega</div></div>`;
+    else body = `${head}<div class="impRun"><div class="impBig">✅ ${j.found}/${j.total} mile</div><div class="impSub">“${esc(j.name)}” playlist ban gayi${j.capped ? ` (pehle ${j.total} gaane)` : ""}</div>
+      <div class="impBtns"><button data-s="impOpen" class="impPri">Open Playlist</button><button data-s="impAgain" class="impSec">Aur import karo</button></div>
+      ${j.missing.length ? `<details class="impMiss"><summary>Not found (${j.missing.length})</summary><ol>${j.missing.map(t => `<li>${esc(t.title)}<small>${esc(t.artists)}</small></li>`).join("")}</ol></details>` : ""}</div>`;
+  }
+  return `<div class="sgroup impSheet" id="impBox"><div class="shead impHead"><div class="impLogos">${SPICON}${AMICON}</div><div><div class="t1">Import Playlist</div><div class="sub">Spotify ya Apple Music se</div></div></div>${body}</div>`;
+}
+function impShow() {
+  showSheet(impSheetHTML(), {
+    impGo: () => { const v = ($("#impUrl") || {}).value || ""; impStart(v); return true; },
+    impPaste: () => { navigator.clipboard.readText().then(t => { const i = $("#impUrl"); if (i && t) { i.value = t.trim(); impStart(i.value); } }).catch(() => { toast("Paste nahi hua, link khud paste karo"); const i = $("#impUrl"); if (i) i.focus(); }); return true; },
+    impOpen: () => { const id = impJob && impJob.plId; impJob = null; if (id) go("library", id); },
+    impAgain: () => { impJob = null; impShow(); return true; },
+  });
+  const i = $("#impUrl"); if (i) { i.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); impStart(i.value); } }); }
+}
+function impRefresh() { // update the sheet only if it is open and showing import
+  const box = document.getElementById("impBox"); if (!box || sheet.classList.contains("hidden")) return;
+  if (impJob && impJob.phase === "match" && document.getElementById("impBig")) {
+    const j = impJob; $("#impBig").textContent = `${j.found}/${j.total} mile`; $("#impFill").style.width = Math.round((j.done / j.total) * 100) + "%"; $("#impSub").textContent = `JioSaavn pe dhoondh rahe hain · ${j.done}/${j.total} check hue`; return;
+  }
+  impShow();
+}
+async function impPost(path, body) {
+  const r = await fetch(IMP_BASE + path, { method: "POST", headers: { "content-type": "text/plain;charset=UTF-8" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error("HTTP " + r.status); return r.json();
+}
+async function impStart(raw) {
+  raw = String(raw || "").trim();
+  if (impJob && (impJob.phase === "load" || impJob.phase === "match")) return;
+  if (!raw) { toast("Pehle playlist ka link paste karo"); return; }
+  if (!/spotify|apple\.com|spoti\.fi/i.test(raw)) { impJob = { phase: "error", url: raw, msg: "Ye Spotify / Apple Music link nahi lag raha. Playlist → Share → Copy link karke paste karo." }; return impRefresh(); }
+  impJob = { phase: "load", url: raw, done: 0, found: 0, missing: [] }; impRefresh();
+  let pl;
+  try { pl = await impPost("/api/import", { url: raw }); } catch (e) { impJob = { phase: "error", url: raw, msg: navigator.onLine === false ? "Internet nahi hai, check karke dobara try karo." : "Abhi playlist load nahi ho payi, thodi der me try karo." }; return impRefresh(); }
+  if (!pl || !pl.ok) { impJob = { phase: "error", url: raw, msg: (pl && pl.msg) || "Playlist nahi khuli. Playlist public karo (share link)." }; return impRefresh(); }
+  const tracks = pl.tracks || [];
+  const job = impJob = { phase: "match", url: raw, name: pl.name, cover: pl.cover, source: pl.source, total: tracks.length, capped: !!pl.capped, done: 0, found: 0, missing: [], res: new Array(tracks.length).fill(null) };
+  impRefresh();
+  const B = 6; const batches = []; for (let i = 0; i < tracks.length; i += B) batches.push(i);
+  let next = 0;
+  const worker = async () => {
+    while (next < batches.length) {
+      const s = batches[next++]; const part = tracks.slice(s, s + B);
+      let res = null;
+      for (let a = 0; a < 2 && !res; a++) { try { res = (await impPost("/api/import/match", { tracks: part })).results; } catch (e) { await new Promise(r => setTimeout(r, 800)); } }
+      part.forEach((t, k) => { const m = res && res[k]; job.res[s + k] = m || null; job.done++; if (m) job.found++; });
+      if (impJob === job) impRefresh();
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  if (impJob !== job) return;
+  const seen = new Set(); const out = [];
+  job.res.forEach((m, k) => { if (!m) { job.missing.push(tracks[k]); return; } if (seen.has(m.id)) return; seen.add(m.id); out.push(slim({ ...m, src: "saavn" })); });
+  if (!out.length) { impJob = { phase: "error", url: raw, msg: "Is playlist ka koi gaana JioSaavn pe nahi mila 😕" }; return impRefresh(); }
+  let name = String(pl.name || "Imported").trim().slice(0, 80) || "Imported", n = 2;
+  const taken = x => playlists.some(p => (p.name || "").trim().toLowerCase() === x.toLowerCase());
+  while (taken(name)) name = `${String(pl.name || "Imported").trim().slice(0, 74)} (${n++})`;
+  const np = { id: "p" + Date.now().toString(36), name, tracks: out, from: pl.source };
+  playlists.unshift(np); store.set("playlists", playlists);
+  job.phase = "done"; job.name = name; job.plId = np.id;
+  if (curTab === "library" && !subView) rerender();
+  if (document.getElementById("impBox") && !sheet.classList.contains("hidden")) impShow(); else toast(`✅ “${name}” ready · ${job.found}/${job.total} gaane`);
+}
+document.addEventListener("click", e => { const b = e.target.closest("[data-act=importPl]"); if (b) { e.preventDefault(); e.stopPropagation(); if (impJob && (impJob.phase === "done" || impJob.phase === "error")) impJob = null; impShow(); } }, true);
 })();
