@@ -161,6 +161,7 @@ async function doSearch(text, kind) {
   s.loading = false; if (curTab === "search") renderSearch();
 }
 
+const FOOTER = () => `<div class="dFoot"><img src="/dhun-mark.png" alt="" width="28" height="35"><div>Made with ❤️ for music lovers</div><div>Support &amp; love 💖 — Contact on Telegram: <a href="https://t.me/Memer_guru" target="_blank" rel="noopener">@Memer_guru</a></div></div>`;
 function renderLibrary() {
   if (subView === "settings") return renderSettings();
   if (subView) return renderPlaylistView(subView);
@@ -175,6 +176,7 @@ function renderLibrary() {
   if (playlists.length) {
     h += `<h2>Playlists</h2><div class="grid">${playlists.map(pl => `<button class="tile" data-open="${esc(pl.id)}">${plArtHTML(pl)}<div class="t1">${esc(pl.name)}</div><div class="t2">${pl.tracks.length} song${pl.tracks.length === 1 ? "" : "s"}</div></button>`).join("")}</div>`;
   } else h += `<div class="empty">Make a playlist and add songs from any “···” menu.</div>`;
+  h += FOOTER();
   view.innerHTML = h;
 }
 function dlTracks() { return Object.values(dlIdx).sort((a, b) => b.at - a.at).map(x => x.t); }
@@ -234,7 +236,7 @@ function renderSettings() {
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button></div>
-  <div class="setNote" style="margin:14px 20px 30px;text-align:center">Dhun · free, no ads</div>`;
+  <div class="setNote" style="margin:14px 20px 0;text-align:center">Dhun · free, no ads</div>${FOOTER()}`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -267,7 +269,7 @@ view.addEventListener("click", e => {
     if (a === "dlAll") { const p = subView && getPlaylist(subView); if (p) downloadAll(p.tracks); return; }
     if (a === "tgConnect") return tgConnectSheet();
     if (a === "acctConnect") return tgConnectSheet("Sign in to save your likes, playlists & history to your own account, on any phone");
-    if (a === "syncNow") { syncPull(true).then(() => toast(syncErr ? "Couldn't sync, check internet" : "Synced ✅")); acctUi(); return; }
+    if (a === "syncNow") { tgRefresh(true); syncPull(true).then(() => toast(syncErr ? "Couldn't sync, check internet" : "Synced ✅")); acctUi(); return; }
     if (a === "tgOpen") { window.open(`https://t.me/${tgBot}`, "_blank"); return; }
     if (a === "tgOff") { if (confirm("Log out of your Dhun account on this phone? Your likes, playlists and Telegram songs stay saved in your account — connect again to get them back.")) tgDisconnect(); return; }
     if (a === "rmDl") return removeDl(act.dataset.id);
@@ -642,10 +644,12 @@ function acctHTML(compact) {
   if (!tgMe.linked) return compact
     ? `<div class="acct off"><div class="acctTxt"><b>Sign in with Telegram</b><small>Save your likes & playlists to your own account, get them back on any phone</small></div><button data-act="acctConnect" class="tgB">${TGICON}Connect</button></div>`
     : `<div class="setCard acctCard"><div class="acctHead"><div class="tgLogo">${TGICON}</div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
-  const who = tgMe.username ? "@" + esc(tgMe.username) : esc(tgMe.name || "Telegram");
+  const nm = String(tgMe.name || "").trim(), realNm = /[\p{L}\p{N}]/u.test(nm) ? nm : ""; // ".. .." style names → fallback
+  const who = realNm ? esc(realNm) : tgMe.username ? "@" + esc(tgMe.username) : "Telegram user";
+  const whoSub = realNm && tgMe.username ? "@" + esc(tgMe.username) + " · " : "";
   const st = syncBusy ? "Syncing…" : Object.keys(syncDirty).length ? (syncErr === "offline" ? "Offline, will sync later" : "Saving…") : syncAt ? `Synced ${ago(syncAt)}` : "Syncing…";
-  if (compact) return `<button class="acct on" data-act="settings"><div class="acctTxt"><b>☁️ ${who}</b><small>${st} · ${liked.length} liked · ${playlists.length} playlist${playlists.length === 1 ? "" : "s"}</small></div></button>`;
-  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgLogo">${TGICON}</div><div><b>${who}</b><small>${tgMe.name && tgMe.username ? esc(tgMe.name) + " · " : ""}Signed in with Telegram ✅</small></div></div>
+  if (compact) return `<button class="acct on" data-act="settings"><div class="acctTxt"><b>☁️ ${who}${realNm && tgMe.username ? ` <span class="sub">@${esc(tgMe.username)}</span>` : ""}</b><small>${st} · ${liked.length} liked · ${playlists.length} playlist${playlists.length === 1 ? "" : "s"}</small></div></button>`;
+  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgLogo">${TGICON}</div><div><b>${who}</b><small>${whoSub}Signed in with Telegram ✅</small></div></div>
     <div class="setNote">☁️ ${st}<br>Your likes (${liked.length}), playlists (${playlists.length}), recently played and Telegram downloads (${Object.keys(dlIdx).length}) are saved to your account. Connect Telegram on any other phone to get them back.</div>
     <div class="btnRow" style="padding:10px 0 2px;margin:0"><button data-act="syncNow">Sync now</button><button data-act="tgOff" style="color:#ff453a">Log out</button></div></div>`;
 }

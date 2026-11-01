@@ -212,3 +212,8 @@ h1.hrow{display:flex;align-items:center;justify-content:space-between}
 .dlm.ph svg{fill:#30d158}
 .dlm + .dlm{margin-left:2px}
 .dlm.tg svg{fill:#2aabee}
+
+.dFoot{text-align:center;color:var(--sub);font-size:12.5px;line-height:1.6;padding:28px 24px 8px}
+.dFoot img{display:block;margin:0 auto 8px;opacity:.85;width:28px;height:auto}
+.dFoot a{color:#9a8cff;text-decoration:none;font-weight:600}
+.acct b .sub{font-weight:400;font-size:12px;color:var(--sub)}
