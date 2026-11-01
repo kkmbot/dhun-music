@@ -161,7 +161,7 @@ async function doSearch(text, kind) {
   s.loading = false; if (curTab === "search") renderSearch();
 }
 
-const FOOTER = () => `<div class="dFoot"><img src="/dhun-mark.png" alt="" width="26" height="32"><div class="dfT">Support &amp; Love 💖</div><div class="dfSig">Mavi</div><a class="dfBtn" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}Contact us</a></div>`;
+const FOOTER = () => `<div class="dFoot"><img src="/dhun-mark.png" alt="" width="26" height="32"><div class="dfGrid"><span class="dfR">Support</span><span class="dfAmp">&amp;</span><span class="dfL">Love 💖</span><span></span><span class="dfSigCell"><span class="dfSig">Mavi</span></span><span></span></div><a class="dfBtn" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}Contact us</a></div>`;
 function renderLibrary() {
   if (subView === "settings") return renderSettings();
   if (subView) return renderPlaylistView(subView);
