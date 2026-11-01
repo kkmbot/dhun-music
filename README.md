@@ -81,5 +81,11 @@ Dhun ek free music app hai jo browser me chalta hai aur phone ki home screen pe 
 
 Dhyan rahe: GitHub Pages pe sirf app ki screens chalengi. Gaane, Telegram aur accounts ke liye server (`_worker.js`) chahiye, jo Cloudflare Workers (free plan) pe chal sakta hai. Bot token aur baaki secrets kabhi repo me mat daalna, unhe server ke environment variables / secrets me rakho (`.env.example` dekho).
 
+## 📱 Android app (offline)
+
+The `android/` folder is an Android app version of Dhun. Its UI is bundled inside the app, so it opens with no internet, and songs saved with **Download to phone** play in airplane mode, with lock-screen controls. GitHub Actions builds the APK automatically (`.github/workflows/android.yml`) and attaches it to a **Release**.
+
+**APK kaise install karein:** repo me *Releases* → latest → `Dhun-v1.0.x.apk` download karo → file pe tap → "Install unknown apps" allow karo → Install. Poori steps: [`android/README.md`](android/README.md).
+
 ---
 Live demo: https://dhun.sites.tab.bot/

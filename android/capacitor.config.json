@@ -1,0 +1,20 @@
+{
+  "appId": "app.dhun.music",
+  "appName": "Dhun",
+  "webDir": "web",
+  "android": {
+    "backgroundColor": "#000000"
+  },
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    },
+    "SystemBars": {
+      "insetsHandling": "native",
+      "style": "DARK"
+    }
+  }
+}
