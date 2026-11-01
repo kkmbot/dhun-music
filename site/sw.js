@@ -1,5 +1,5 @@
-const C = "dhun-v10";
-const SHELL = ["/", "/app.css?v=10", "/app.js?v=10", "/manifest.webmanifest?v=10", "/favicon.ico?v=10", "/favicon-32.png?v=10", "/icon-192.png?v=10", "/icon-512.png?v=10", "/icon-192.png", "/apple-touch-icon.png?v=10", "/logo-h.webp?v=10", "/dhun-mark.webp?v=10"];
+const C = "dhun-v11";
+const SHELL = ["/", "/app.css?v=11", "/app.js?v=11", "/manifest.webmanifest?v=11", "/favicon.ico?v=11", "/favicon-32.png?v=11", "/icon-192.png?v=11", "/icon-512.png?v=11", "/icon-192.png", "/apple-touch-icon.png?v=11", "/logo-h.webp?v=11", "/dhun-mark.webp?v=11"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(C).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", e => {
