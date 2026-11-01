@@ -1,10 +1,10 @@
 {
-  "versionCode": 10,
-  "versionName": "1.0.10",
+  "versionCode": 11,
+  "versionName": "1.0.11",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Spotify/Apple Music playlist import 🎶",
+  "notes": "Listen Together 🎧 — dosto ke saath ek saath gaane suno",
   "force": false,
-  "size": 4862525,
-  "bytes": 4862525,
-  "sha256": "4c0b4cc1319b569babcbe7c03384dcedfb0f82c8ddeb1e7785375e2dfb89b069"
+  "size": 4871825,
+  "bytes": 4871825,
+  "sha256": "69ac9fa781da9e028cd142776e697aca47cabe723daf1d9b27bdf8f2e3b2299d"
 }
