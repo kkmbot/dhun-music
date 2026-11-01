@@ -13,7 +13,8 @@ Dhun is a free music player that runs in the browser and installs on a phone's h
 - **Likes, playlists, recently played**.
 - **Telegram downloads**: tap Download and the song arrives in the user's own chat with the bot. Each song is uploaded once to a private storage group and then forwarded from there, so repeat downloads are instant. Downloaded songs also play inside the app.
 - **Per-user accounts**: after "Connect Telegram", each user's likes, playlists and history are saved on the server under their own Telegram account and come back on any device. Every request is checked with that user's random session token.
-- **Admin bot panel**: the admin types `/admin` in the bot to get buttons for Stats, Users, Top songs, Broadcast (with preview, dry run and confirm), Refresh and Help. Text commands `/stats`, `/users`, `/broadcast`, `/help` also work. Only the `ADMIN_ID` can use them.
+- **Admin bot panel**: the admin types `/admin` in the bot to get buttons for Stats, Users, Top songs, Broadcast (with preview, dry run and confirm), Refresh, Help and 🧪 Test log. Text commands `/stats`, `/users`, `/broadcast`, `/testlog`, `/help` also work. Only the `ADMIN_ID` can use them.
+- **Logs channel (optional)**: set `LOG_CHANNEL_ID` and the bot posts a short "👤 New user" line there the first time someone starts the bot or connects Telegram from the app (name, @username, user id, time IST, and how they came in). Only new users are logged. Logging is fire-and-forget (never slows down or breaks the user's action) and capped at 20 lines/min with a "+N more" rollup. `/stats` shows whether the logs channel is reachable.
 
 ## Folder layout
 
@@ -44,6 +45,7 @@ No secrets are stored in this repo. The server reads them from environment varia
 | `STORAGE_CHAT_ID` | id of the private group where songs are stored once (bot must be admin) |
 | `BOT_USERNAME` | bot username without `@` |
 | `PUBLIC_URL` | public https address of the server, with trailing slash |
+| `LOG_CHANNEL_ID` | optional: id of a Telegram channel/group for new-user logs, e.g. `-1001234567890` (bot must be admin with permission to post). Leave empty to turn logging off |
 
 The server also needs a SQLite-style database bound as `DB` (Cloudflare D1) and the static files bound as `ASSETS`.
 
@@ -55,7 +57,7 @@ The server also needs a SQLite-style database bound as `DB` (Cloudflare D1) and 
 
 1. Install Wrangler: `npm i -g wrangler` then `wrangler login`.
 2. Create the database: `wrangler d1 create dhun`, put its id in `wrangler.toml`, then optionally `wrangler d1 execute dhun --remote --file=schema.sql`.
-3. Set secrets: `wrangler secret put BOT_TOKEN`, `wrangler secret put WEBHOOK_SECRET`, `wrangler secret put ADMIN_ID`, `wrangler secret put STORAGE_CHAT_ID`. Put `BOT_USERNAME` and `PUBLIC_URL` under `[vars]`.
+3. Set secrets: `wrangler secret put BOT_TOKEN`, `wrangler secret put WEBHOOK_SECRET`, `wrangler secret put ADMIN_ID`, `wrangler secret put STORAGE_CHAT_ID`. Put `BOT_USERNAME`, `PUBLIC_URL` (and optionally `LOG_CHANNEL_ID`) under `[vars]`.
 4. Deploy: `wrangler deploy`.
 5. Point the bot at the server (replace the values):
    ```
@@ -65,7 +67,7 @@ The server also needs a SQLite-style database bound as `DB` (Cloudflare D1) and 
      -d 'allowed_updates=["message","callback_query","my_chat_member"]'
    ```
    Check it with `https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo`.
-6. Optional: set the bot's Menu commands with `setMyCommands` (`/start` for everyone; `/admin`, `/stats`, `/users`, `/broadcast`, `/help` with scope `{"type":"chat","chat_id":<ADMIN_ID>}`).
+6. Optional: set the bot's Menu commands with `setMyCommands` (`/start` for everyone; `/admin`, `/stats`, `/users`, `/broadcast`, `/testlog`, `/help` with scope `{"type":"chat","chat_id":<ADMIN_ID>}`).
 
 **Things to know:**
 
@@ -77,7 +79,7 @@ The server also needs a SQLite-style database bound as `DB` (Cloudflare D1) and 
 
 ## हिंदी / Hinglish summary
 
-Dhun ek free music app hai jo browser me chalta hai aur phone ki home screen pe app ki tarah add ho jata hai. JioSaavn se gaane search aur play hote hain (320 kbps tak), queue, EQ, quality settings sab hai. Download dabane pe gaana phone storage me nahi, user ke apne Telegram bot chat me aata hai. Har user ka apna account hai (Telegram se login), aur admin bot me `/admin` likh ke stats, users aur broadcast buttons se chala sakta hai.
+Dhun ek free music app hai jo browser me chalta hai aur phone ki home screen pe app ki tarah add ho jata hai. JioSaavn se gaane search aur play hote hain (320 kbps tak), queue, EQ, quality settings sab hai. Download dabane pe gaana phone storage me nahi, user ke apne Telegram bot chat me aata hai. Har user ka apna account hai (Telegram se login), aur admin bot me `/admin` likh ke stats, users aur broadcast buttons se chala sakta hai. `LOG_CHANNEL_ID` set karo to har naye user ka log ek Telegram channel me aata hai.
 
 Dhyan rahe: GitHub Pages pe sirf app ki screens chalengi. Gaane, Telegram aur accounts ke liye server (`_worker.js`) chahiye, jo Cloudflare Workers (free plan) pe chal sakta hai. Bot token aur baaki secrets kabhi repo me mat daalna, unhe server ke environment variables / secrets me rakho (`.env.example` dekho).
 

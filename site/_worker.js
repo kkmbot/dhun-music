@@ -225,6 +225,8 @@ function db(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS udata (chat_id INTEGER PRIMARY KEY, liked TEXT, playlists TEXT, recent TEXT, rev INTEGER DEFAULT 0, at INTEGER)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS dlog (chat_id INTEGER, sid TEXT, title TEXT, artist TEXT, at INTEGER)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS bcast (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, text TEXT, from_chat INTEGER, msg_id INTEGER, status TEXT, total INTEGER DEFAULT 0, sent INTEGER DEFAULT 0, failed INTEGER DEFAULT 0, blocked INTEGER DEFAULT 0, lease INTEGER DEFAULT 0, created INTEGER, done_at INTEGER)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS logm (minute INTEGER PRIMARY KEY, n INTEGER DEFAULT 0, dropped INTEGER DEFAULT 0)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS bq (bid INTEGER, chat_id INTEGER, state INTEGER DEFAULT 0, PRIMARY KEY (bid, chat_id))"),
     env.DB.prepare("INSERT OR IGNORE INTO people (chat_id, username, name, first_at, last_seen, blocked, connected) SELECT chat_id, MAX(username), MAX(name), MIN(COALESCE(NULLIF(linked,0), created)), MAX(COALESCE(NULLIF(linked,0), created)), 0, 1 FROM users WHERE chat_id IS NOT NULL AND chat_id > 0 GROUP BY chat_id"),
     env.DB.prepare("INSERT INTO dlog (chat_id, sid, title, artist, at) SELECT chat_id, sid, title, artist, at FROM dls WHERE NOT EXISTS (SELECT 1 FROM dlog)"),
@@ -233,6 +235,65 @@ function db(env) {
 }
 async function evCount(d, kind, sinceMs) { const r = await d.prepare("SELECT COUNT(*) AS n FROM ev WHERE kind = ? AND at > ?").bind(kind, Date.now() - sinceMs).first(); return r ? r.n : 0; }
 async function evAdd(d, kind) { await d.prepare("INSERT INTO ev (kind, at) VALUES (?, ?)").bind(kind, Date.now()).run(); if (Math.random() < 0.05) await d.prepare("DELETE FROM ev WHERE at < ?").bind(Date.now() - 3 * 86400e3).run(); }
+
+// ---------- logs channel: fire-and-forget, throttled; a log can never block or break the user action ----------
+// optional: Telegram channel/group id for logs (bot must be admin there and allowed to post); empty = logging off
+const logCh = env => String((env && env.LOG_CHANNEL_ID) || "").trim();
+const LOG_PER_MIN = 20;
+const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const cut = (s, n) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
+const hm = (ms = Date.now()) => new Date(ms + 5.5 * 3600e3).toISOString().slice(11, 16) + " IST";
+const who = x => { x = x || {}; const id = x.chat_id || x.id; const nm = cut(x.name || [x.first_name, x.last_name].filter(Boolean).join(" "), 50); return `${id ? `<a href="tg://user?id=${id}">${esc(nm || "user")}</a>` : esc(nm || "?")}${x.username ? " @" + esc(x.username) : ""}${id ? ` · <code>${id}</code>` : ""}`; };
+async function kvGet(d, k) { const r = await d.prepare("SELECT v FROM kv WHERE k = ?").bind(k).first(); return r ? r.v : null; }
+async function kvSet(d, k, v) { await d.prepare("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(k, String(v)).run(); }
+async function logSend(env, html, opt = {}) {
+  const ch = logCh(env); if (!ch) return { skipped: "no log channel" };
+  const d = await db(env); const now = Date.now(), min = Math.floor(now / 60e3);
+  if (opt.dedupe) { // same kind of error at most once per window
+    const g = await d.prepare("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v WHERE CAST(kv.v AS INTEGER) < ?").bind("dd:" + opt.dedupe, String(now), now - (opt.every || 600e3)).run();
+    if (!g.meta || !g.meta.changes) return { deduped: true };
+  }
+  await d.prepare("INSERT INTO logm (minute, n, dropped) VALUES (?, 1, 0) ON CONFLICT(minute) DO UPDATE SET n = logm.n + 1").bind(min).run();
+  if (!opt.force) {
+    const row = await d.prepare("SELECT n FROM logm WHERE minute = ?").bind(min).first();
+    if (((row && row.n) || 0) > LOG_PER_MIN) { await d.prepare("UPDATE logm SET dropped = dropped + 1 WHERE minute = ?").bind(min).run(); return { throttled: true }; }
+  }
+  let extra = "";
+  const old = await d.prepare("SELECT SUM(dropped) AS s FROM logm WHERE minute < ? AND dropped > 0").bind(min).first();
+  if (old && old.s > 0) { const cl = await d.prepare("UPDATE logm SET dropped = 0 WHERE minute < ? AND dropped > 0").bind(min).run(); if (cl.meta && cl.meta.changes) extra = `\n\n<i>➕ ${old.s} aur log skip hue (limit ${LOG_PER_MIN}/min)</i>`; }
+  if (Math.random() < 0.03) await d.prepare("DELETE FROM logm WHERE minute < ? AND dropped = 0").bind(min - 3 * 1440).run().catch(() => {});
+  const text = cut(html, 3900) + extra;
+  let m;
+  try { m = await tg("sendMessage", { chat_id: ch, text, parse_mode: "HTML", disable_web_page_preview: true, disable_notification: !!opt.silent }); }
+  catch (e) {
+    if (e.code === 400 && /parse|entit/i.test(e.message)) { m = await tg("sendMessage", { chat_id: ch, text: text.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"), disable_web_page_preview: true }); }
+    else { await kvSet(d, "log_err", JSON.stringify({ at: now, e: scrub(e.message).slice(0, 200) })).catch(() => {}); throw e; }
+  }
+  await kvSet(d, "log_ok", JSON.stringify({ at: now, mid: m.message_id, title: (m.chat && m.chat.title) || "" })).catch(() => {});
+  return { ok: true, message_id: m.message_id };
+}
+// ctx.test (simulations) marks the line as a test; ctx.collect gathers the promise so a test can read the message id
+function logEv(env, ctx, html, opt) {
+  const p = (async () => {
+    return logSend(env, (ctx && ctx.test ? "🧪 <b>TEST</b> · " : "") + html, opt);
+  })().catch(e => ({ error: scrub(e && e.message || e) }));
+  if (ctx && ctx.collect) ctx.collect.push(p); else if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+  return p;
+}
+const logNewUser = (env, ctx, from, how) => logEv(env, ctx, `👤 <b>New user</b> · ${how}\n${who(from)}\n🕒 ${istDate(Date.now())} ${hm()}`);
+async function logStatus(env) {
+  const ch = logCh(env); if (!ch) return "📝 Logs channel: set nahi hai";
+  let line = "";
+  try { const c = memGet("logchat") || await tg("getChat", { chat_id: ch }); memSet("logchat", c, 600); line = `📝 Logs channel: ✅ ${c.title || ch}`; }
+  catch (e) { line = `📝 Logs channel: ❌ ${scrub(e.message).slice(0, 120)}`; }
+  try {
+    const d = await db(env);
+    const today = ((await d.prepare("SELECT SUM(n) AS s FROM logm WHERE minute >= ?").bind(Math.floor(dayStart() / 60e3)).first()) || {}).s || 0;
+    const ok = JSON.parse((await kvGet(d, "log_ok")) || "null"), er = JSON.parse((await kvGet(d, "log_err")) || "null");
+    line += `\n    aaj ${today} log${today === 1 ? "" : "s"}` + (ok ? ` · last ok ${hm(ok.at)}` : "") + (er && (!ok || er.at > ok.at) ? `\n    ⚠️ last error ${hm(er.at)}: ${er.e}` : "");
+  } catch (e) {}
+  return line;
+}
 const dlOut = r => ({ id: r.id, sid: r.sid, title: r.title, artist: r.artist, album: r.album, dur: r.dur, thumb: r.thumb, q: r.q, bytes: r.bytes, at: r.at, src: "saavn", tgmid: r.dm_mid });
 async function headLen(url) { try { const r = await fetch(url, { method: "HEAD", headers: { "user-agent": UA } }); if (!r.ok) return -1; return +r.headers.get("content-length") || 0; } catch (e) { return -1; } }
 async function userOf(d, code, ctx) {
@@ -244,7 +305,9 @@ async function userOf(d, code, ctx) {
 async function personSeen(d, from, connected) {
   if (!from || !from.id || from.id < 0) return;
   const name = [from.first_name, from.last_name].filter(Boolean).join(" ").slice(0, 60), now = Date.now();
+  const was = await d.prepare("SELECT connected, blocked FROM people WHERE chat_id = ?").bind(from.id).first();
   await d.prepare("INSERT INTO people (chat_id, username, name, first_at, last_seen, blocked, connected) VALUES (?, ?, ?, ?, ?, 0, ?) ON CONFLICT(chat_id) DO UPDATE SET username = excluded.username, name = excluded.name, last_seen = excluded.last_seen, blocked = 0, connected = MAX(people.connected, excluded.connected)").bind(from.id, from.username || "", name, now, now, connected ? 1 : 0).run();
+  return { isNew: !was, wasConnected: !!(was && was.connected), wasBlocked: !!(was && was.blocked) };
 }
 const markBlocked = (d, chatId) => d.prepare("UPDATE people SET blocked = 1 WHERE chat_id = ?").bind(chatId).run().catch(() => {});
 const cleanName = s => String(s || "").replace(/[\\/:*?"<>|]/g, " ").slice(0, 80).trim();
@@ -323,8 +386,8 @@ async function tgStream(env, req, code, id) {
 const IST = 5.5 * 3600e3;
 const dayStart = () => Math.floor((Date.now() + IST) / 86400e3) * 86400e3 - IST;
 const istDate = ms => new Date(ms + IST).toISOString().slice(0, 10).split("-").reverse().join("-");
-const ADMIN_CMDS = /^\/(admin|panel|stats|users|top|broadcast|confirm|cancel|dryrun|help)(?:@\w+)?(?:\s|$)/i;
-async function adminStats(d) {
+const ADMIN_CMDS = /^\/(admin|panel|stats|users|top|broadcast|confirm|cancel|dryrun|testlog|help)(?:@\w+)?(?:\s|$)/i;
+async function adminStats(d, env) {
   const t0 = dayStart(), w0 = Date.now() - 7 * 86400e3;
   const one = async (q, ...b) => ((await d.prepare(q).bind(...b).first()) || {}).n || 0;
   const [conn, starters, newT, new7, actT, blk, dlAll, dlT, cache] = await Promise.all([
@@ -333,7 +396,11 @@ async function adminStats(d) {
     one("SELECT COUNT(*) AS n FROM people WHERE last_seen >= ?", t0), one("SELECT COUNT(*) AS n FROM people WHERE blocked = 1"),
     one("SELECT COUNT(*) AS n FROM dlog"), one("SELECT COUNT(*) AS n FROM dlog WHERE at >= ?", t0), one("SELECT COUNT(*) AS n FROM files")]);
   const top = ((await d.prepare("SELECT sid, MAX(title) AS title, MAX(artist) AS artist, COUNT(*) AS n FROM dlog GROUP BY sid ORDER BY n DESC, MAX(at) DESC LIMIT 10").all()).results || []);
-  return `📊 Dhun stats (${istDate(Date.now())})\n\n👥 Connected users: ${conn}${starters > conn ? ` (+${starters - conn} started bot only)` : ""}\n🆕 New today: ${newT} · last 7 days: ${new7}\n🟢 Active today: ${actT}\n🚫 Blocked the bot: ${blk}\n\n⬇️ Total downloads: ${dlAll}\n📅 Downloads today: ${dlT}\n🗂 Songs in storage group: ${cache}\n\n🏆 Top 10 songs:\n` + (top.length ? top.map((r, i) => `${i + 1}. ${r.title} – ${r.artist} (${r.n})`).join("\n") : "abhi koi download nahi");
+  return `📊 Dhun stats (${istDate(Date.now())})\n\n👥 Connected users: ${conn}${starters > conn ? ` (+${starters - conn} started bot only)` : ""}\n🆕 New today: ${newT} · last 7 days: ${new7}\n🟢 Active today: ${actT}\n🚫 Blocked the bot: ${blk}\n\n⬇️ Total downloads: ${dlAll}\n📅 Downloads today: ${dlT}\n🗂 Songs in storage group: ${cache}\n\n🏆 Top 10 songs:\n` + (top.length ? top.map((r, i) => `${i + 1}. ${r.title} – ${r.artist} (${r.n})`).join("\n") : "abhi koi download nahi") + (env ? "\n\n" + await logStatus(env) : "");
+}
+async function testLog(env, from) {
+  try { return await logSend(env, `🧪 <b>Test log</b> · Dhun logs channel kaam kar raha hai ✅\nAdmin: ${who(from)}\n🕒 ${istDate(Date.now())} ${hm()}`, { force: true }); }
+  catch (e) { return { error: scrub(e && e.message || e) }; }
 }
 async function adminUsers(d) {
   const rs = ((await d.prepare("SELECT p.*, (SELECT COUNT(*) FROM dlog l WHERE l.chat_id = p.chat_id) AS dl FROM people p ORDER BY p.first_at DESC LIMIT 20").all()).results || []);
@@ -341,12 +408,12 @@ async function adminUsers(d) {
   if (!rs.length) return "👥 Abhi koi user nahi hai.";
   return `👥 Last ${rs.length} of ${tot} users (newest first)\n\n` + rs.map((r, i) => `${i + 1}. ${r.username ? "@" + r.username : ""}${r.username && r.name ? " · " : ""}${r.name || (r.username ? "" : "id " + r.chat_id)}${r.blocked ? " 🚫" : ""}${r.connected ? "" : " (bot only)"}\n    joined ${istDate(r.first_at || 0)} · ${r.dl} downloads`).join("\n");
 }
-const ADMIN_HELP = `🛠 Admin commands (sirf aapke liye)\n\n/admin – buttons wala admin panel\n/stats – users, downloads, top songs\n/users – last 20 users\n/broadcast <text> – sab users ko message\n   ya kisi photo/audio/video/text message ko reply karke /broadcast likho – wo message sabko copy hoga\n/confirm – pending broadcast bhejo\n/dryrun – check karo kitno ko jayega (kuch nahi bhejta)\n/cancel – pending broadcast cancel\n/help – ye list`;
+const ADMIN_HELP = `🛠 Admin commands (sirf aapke liye)\n\n/admin – buttons wala admin panel\n/stats – users, downloads, top songs\n/users – last 20 users\n/broadcast <text> – sab users ko message\n   ya kisi photo/audio/video/text message ko reply karke /broadcast likho – wo message sabko copy hoga\n/confirm – pending broadcast bhejo\n/dryrun – check karo kitno ko jayega (kuch nahi bhejta)\n/cancel – pending broadcast cancel\n/testlog – logs channel me test message\n/help – ye list\n\n📝 Logs channel me sirf naye users ka log jata hai.`;
 const recipientsSQL = "SELECT chat_id FROM people WHERE blocked = 0 AND chat_id > 0";
 
 // ---------- /admin button panel (inline keyboard + callback_query) ----------
 const kb = rows => ({ inline_keyboard: rows.map(r => r.map(([text, data]) => ({ text, callback_data: data }))) });
-const PANEL_KB = kb([[["📊 Stats", "a:stats"], ["👥 Users", "a:users"]], [["🎵 Top songs", "a:top"], ["📢 Broadcast", "a:bc"]], [["🔄 Refresh", "a:refresh"], ["❓ Help", "a:help"]]]);
+const PANEL_KB = kb([[["📊 Stats", "a:stats"], ["👥 Users", "a:users"]], [["🎵 Top songs", "a:top"], ["📢 Broadcast", "a:bc"]], [["🔄 Refresh", "a:refresh"], ["❓ Help", "a:help"]], [["🧪 Test log", "a:testlog"]]]);
 const backKb = refresh => kb([...(refresh ? [[["🔄 Refresh", refresh]]] : []), [["« Back", "a:panel"]]]);
 const istTime = ms => new Date(ms + IST).toISOString().slice(11, 19);
 async function panelText(d) {
@@ -358,7 +425,7 @@ async function adminTop(d) {
   const top = ((await d.prepare("SELECT sid, MAX(title) AS title, MAX(artist) AS artist, COUNT(*) AS n FROM dlog GROUP BY sid ORDER BY n DESC, MAX(at) DESC LIMIT 15").all()).results || []);
   return "🎵 Top songs (sabse zyada download)\n\n" + (top.length ? top.map((r, i) => `${i + 1}. ${r.title} – ${r.artist} (${r.n})`).join("\n") : "Abhi koi download nahi hua.");
 }
-const ADMIN_HELP_BTN = `❓ Help\n\n📊 Stats – users, downloads, top 10\n👥 Users – last 20 users\n🎵 Top songs – sabse zyada download\n📢 Broadcast – button dabao, phir jo message bhejna hai (text/photo/audio/video) wo bhejo, preview aayega, phir ✅ Send dabao\n🔄 Refresh – numbers update\n\nText commands bhi chalte hain:\n/admin /stats /users /broadcast /dryrun /cancel /help`;
+const ADMIN_HELP_BTN = `❓ Help\n\n📊 Stats – users, downloads, top 10\n👥 Users – last 20 users\n🎵 Top songs – sabse zyada download\n📢 Broadcast – button dabao, phir jo message bhejna hai (text/photo/audio/video) wo bhejo, preview aayega, phir ✅ Send dabao\n🔄 Refresh – numbers update\n🧪 Test log – logs channel me ek test line (naye users ka log wahan jata hai)\n\nText commands bhi chalte hain:\n/admin /stats /users /broadcast /dryrun /cancel /testlog /help`;
 const nRecipients = async d => ((await d.prepare(`SELECT COUNT(*) AS n FROM (${recipientsSQL})`).first()) || {}).n || 0;
 const nBlocked = async d => ((await d.prepare("SELECT COUNT(*) AS n FROM people WHERE blocked = 1").first()) || {}).n || 0;
 // 'await' = waiting for the admin's next message to become the broadcast; 'pending' = waiting for Send/confirm
@@ -403,9 +470,10 @@ async function tgCallback(env, ctx, d, q, dry) {
       await act("sendMessage", { chat_id, text, reply_markup: markup, disable_web_page_preview: true });
     };
     if (data === "a:panel" || data === "a:refresh") { await edit(await panelText(d), PANEL_KB); return ans(data === "a:refresh" ? "🔄 Updated" : ""); }
-    if (data === "a:stats") { await edit(await adminStats(d), backKb("a:stats")); return ans(""); }
+    if (data === "a:stats") { await edit(await adminStats(d, env), backKb("a:stats")); return ans(""); }
     if (data === "a:users") { await edit(await adminUsers(d), backKb("a:users")); return ans(""); }
     if (data === "a:top") { await edit(await adminTop(d), backKb("a:top")); return ans(""); }
+    if (data === "a:testlog") { const r = await testLog(env, from); return ans(r.message_id ? `✅ Test log bheja (msg #${r.message_id})` : `❌ Log nahi gaya: ${(r.error || "?").slice(0, 150)}`, true); }
     if (data === "a:help") { await edit(ADMIN_HELP_BTN, backKb("")); return ans(""); }
     if (data === "a:bc") {
       const id = await startAwait(d, chat_id);
@@ -438,7 +506,8 @@ async function adminCmd(env, ctx, d, m, text, say) {
   if (cmd === "/admin" || cmd === "/panel") return say(await panelText(d), { reply_markup: PANEL_KB });
   if (cmd === "/top") return say(await adminTop(d));
   if (cmd === "/help") return say(ADMIN_HELP);
-  if (cmd === "/stats") return say(await adminStats(d));
+  if (cmd === "/testlog") { const r = await testLog(env, m.from); return say(r.message_id ? `✅ Test log bheja logs channel me (msg #${r.message_id})` : `❌ Log nahi gaya: ${r.error || "?"}`); }
+  if (cmd === "/stats") return say(await adminStats(d, env));
   if (cmd === "/users") return say(await adminUsers(d));
   const nRecip = async () => ((await d.prepare(`SELECT COUNT(*) AS n FROM (${recipientsSQL})`).first()) || {}).n || 0;
   if (cmd === "/broadcast") {
@@ -524,6 +593,7 @@ async function tgHook(env, req, ctx) {
   const upd = await req.json().catch(() => ({}));
   const d = await db(env);
   ctx.waitUntil(resumeBroadcast(env, ctx));
+  const lctx = dry ? { test: true, collect: [] } : ctx; // simulations: log line marked TEST and its message id returned
   if (upd.my_chat_member) { const c = upd.my_chat_member; if (c.chat && c.chat.type === "private") { const st = c.new_chat_member && c.new_chat_member.status; if (st === "kicked") await markBlocked(d, c.chat.id); else if (st === "member") await d.prepare("UPDATE people SET blocked = 0 WHERE chat_id = ?").bind(c.chat.id).run(); } return J({ ok: true }); }
   if (upd.callback_query) { await tgCallback(env, ctx, d, upd.callback_query, dry); return J(dry ? { ok: true, calls: dry } : { ok: true }); }
   const m = upd.message; if (!m || !m.chat || m.chat.type !== "private") return J({ ok: true });
@@ -531,17 +601,19 @@ async function tgHook(env, req, ctx) {
   const name = [from.first_name, from.last_name].filter(Boolean).join(" ").slice(0, 60);
   const say = (t, extra) => { if (dry) { dry.push(extra ? { text: t, ...extra } : t); return Promise.resolve(); } return m.chat.id < 0 ? Promise.resolve() : tg("sendMessage", { chat_id: m.chat.id, text: t, disable_web_page_preview: true, ...(extra || {}) }).catch(() => {}); };
   say.dry = dry;
-  const done = () => J(dry ? { ok: true, replies: dry } : { ok: true });
+  const done = async () => J(dry ? { ok: true, replies: dry, logs: await Promise.all(lctx.collect) } : { ok: true });
   const st = /^\/start(?:@\w+)?\s+([A-Za-z0-9_-]{16,64})$/.exec(text);
   if (st) {
     const u = await d.prepare("SELECT * FROM users WHERE code = ?").bind(st[1]).first();
     if (!u) { await say("Ye link purana ho gaya. Dhun app me \"Connect Telegram\" dobara tap karo 🙏\n" + SITE); return done(); }
     if (u.chat_id && u.chat_id !== m.chat.id) { await say("Ye link kisi aur Telegram account se already juda hai. Dhun app me \"Connect Telegram\" dobara tap karo."); return done(); }
     await d.prepare("UPDATE users SET chat_id = ?, username = ?, name = ?, linked = ? WHERE code = ?").bind(m.chat.id, from.username || "", name, Date.now(), st[1]).run();
-    await personSeen(d, { ...from, id: m.chat.id }, true);
+    const ps = await personSeen(d, { ...from, id: m.chat.id }, true);
+    if (ps && ps.isNew) logNewUser(env, lctx, { ...from, id: m.chat.id }, "app se 🔗 Connect Telegram");
     await say(WELCOME(from.first_name || "")); return done();
   }
-  await personSeen(d, { ...from, id: m.chat.id }, false).catch(() => {});
+  const ps = await personSeen(d, { ...from, id: m.chat.id }, false).catch(() => null);
+  if (ps && ps.isNew) logNewUser(env, lctx, { ...from, id: m.chat.id }, /^\/start/.test(text) ? "bot me ▶️ /start" : "bot me pehla message");
   if (ADMIN_CMDS.test(text)) {
     const isAdmin = from.id === TG_ADMIN && m.chat.id === TG_ADMIN;
     if (isAdmin) { await adminCmd(env, ctx, d, m, text, say); return done(); }
