@@ -1,10 +1,10 @@
 {
-  "versionCode": 8,
-  "versionName": "1.0.8",
+  "versionCode": 7,
+  "versionName": "1.0.7",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Mavi ka naya font ✨",
+  "notes": "Naya footer + Deals 🔥",
   "force": false,
-  "size": 4812196,
-  "bytes": 4812196,
-  "sha256": "64d9a137824074d38afd4c8463d0ef4689b7777b3d87889b29e76c1102a8bb79"
+  "size": 4812224,
+  "bytes": 4812224,
+  "sha256": "3fad25a0136e10b4856bef5b0c91739ec4e0fb3cffa57ccf03d0a7c66c38b207"
 }
