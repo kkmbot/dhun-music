@@ -49,15 +49,18 @@ jobs:
         working-directory: android/android
         run: |
           chmod +x gradlew
-          # android/VERSION holds the versionCode (bump it for each new release); 1.0.<code> is the version name
+          # android/VERSION holds the versionCode (bump it for each new release; phones update only to a higher code).
+          # android/VERSION_NAME (optional) is the name people see; without it the name is 1.0.<code>.
           VERSION_CODE=$(cat ../VERSION 2>/dev/null | tr -dc 0-9)
           [ -n "$VERSION_CODE" ] || VERSION_CODE=$(( ${{ github.run_number }} + 1 ))
+          VERSION_NAME=$(cat ../VERSION_NAME 2>/dev/null | tr -dc 0-9.)
+          [ -n "$VERSION_NAME" ] || VERSION_NAME=1.0.$VERSION_CODE
           ./gradlew assembleRelease --no-daemon \
             -PdhunVersionCode=$VERSION_CODE \
-            -PdhunVersionName=1.0.$VERSION_CODE
+            -PdhunVersionName=$VERSION_NAME
           mkdir -p ../../dist
-          cp app/build/outputs/apk/release/app-release.apk ../../dist/Dhun-v1.0.$VERSION_CODE.apk
-          echo "VERSION=1.0.$VERSION_CODE" >> $GITHUB_ENV
+          cp app/build/outputs/apk/release/app-release.apk ../../dist/Dhun-v$VERSION_NAME.apk
+          echo "VERSION=$VERSION_NAME" >> $GITHUB_ENV
         env:
           DHUN_KEYSTORE_BASE64: ${{ secrets.DHUN_KEYSTORE_BASE64 }}
           DHUN_KEYSTORE_PASSWORD: ${{ secrets.DHUN_KEYSTORE_PASSWORD }}

@@ -447,3 +447,5 @@ button,input,select,textarea{font-family:inherit}
 #jamChatIn{flex:1;min-width:0;font:inherit;font-size:16px;padding:10px 14px;border-radius:20px;border:.5px solid #48484a;background:#000;color:#fff;outline:none}
 #jamChatIn:focus{border-color:var(--acc)}
 #jamChatSend{flex:none;width:42px;height:42px;border-radius:21px;background:var(--acc);color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center}
+
+.verTag{font-size:11px;color:var(--sub,#8e8e93);opacity:.7;text-align:right;padding:6px 18px 18px;letter-spacing:.2px}

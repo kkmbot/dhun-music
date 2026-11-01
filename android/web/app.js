@@ -246,6 +246,8 @@ function renderSettings() {
   <h2>${NATIVE ? "Download quality" : "Download to Telegram"}</h2>
   <div class="setCard">${segHTML("qDl", ["320", "160", "96"])}<div class="setNote">About ${cfg.qDl === "320" ? "10" : cfg.qDl === "160" ? "5" : "3"} MB for a 4-minute song${NATIVE ? "." : ", stored in Telegram, not on your phone."}</div>
     <button class="setRow" data-act="${tgMe.linked ? "tgOpen" : "tgConnect"}"><span><b>Telegram</b><small>${tgMe.linked ? `Connected${tgMe.username ? " · @" + esc(tgMe.username) : ""} ✅` : "Not connected · tap to connect"}</small></span>${TGICON}</button></div>
+  <h2>AutoMix</h2>
+  <div class="setCard"><button class="setRow" data-act="automix"><span><b>AutoMix 🎚️</b><small>Gaane ek dusre me mix hote hain, Apple Music jaise. Kitna mix, Dhun har gaane ke hisaab se khud decide karta hai</small></span><i class="sw${cfg.automix !== false ? " on" : ""}"></i></button>${mixVolOK ? "" : `<div class="setNote">iPhone browser me AutoMix nahi chal sakta (Safari volume change nahi karne deta) — gaane normal tarike se badlenge.</div>`}<div class="setNote">Listen Together me AutoMix band rehta hai, taaki sabka gaana ek saath chale.</div></div>
   <h2>Equalizer</h2>
   <div class="setCard">
     <button class="setRow" data-act="eqToggle"><span><b>Equalizer</b><small>${eqOn ? eqPreset : "Off"}</small></span><i class="sw${eqOn ? " on" : ""}"></i></button>
@@ -256,7 +258,7 @@ function renderSettings() {
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button><a class="dealRow" href="${esc(deals.join || DEALS_JOIN_DEFAULT)}" target="_blank" rel="noopener"><i class="dealEmoji">🛍️</i><span>Join Deals channel <small class="sub">Daily deals</small></span></a></div>
-  ${NATIVE ? `<div class="setCard" style="margin-top:18px"><button class="setRow" data-act="updCheck"><span><b>Check for updates</b><small>Dhun app v${esc(String((appVer && appVer.versionName) || "…"))}</small></span>${ICON.dl}</button></div>` : ""}${FOOTER()}`;
+  ${NATIVE ? `<div class="setCard" style="margin-top:18px"><button class="setRow" data-act="updCheck"><span><b>Check for updates</b><small>Dhun app v${esc(String((appVer && appVer.versionName) || "…"))}</small></span>${ICON.dl}</button></div>` : ""}${FOOTER()}<div class="verTag">v${esc(String((appVer && appVer.versionName) || "1.0.0"))}</div>`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -295,6 +297,7 @@ view.addEventListener("click", e => {
     if (a === "tgOff") { if (confirm("Log out of your Dhun account on this phone? Your likes, playlists and Telegram songs stay saved in your account — connect again to get them back.")) tgDisconnect(); return; }
     if (a === "rmDl") return removeDl(act.dataset.id);
     if (a === "eqToggle") { setEq(!eqOn); return rerender(); }
+    if (a === "automix") { cfg.automix = cfg.automix === false; saveCfg(); if (cfg.automix === false) mixAbort(); toast(cfg.automix ? "AutoMix on 🎚️" : "AutoMix off"); return rerender(); }
     if (a === "saver") return setSaver(!cfg.saver);
     if (a === "preset") { if (!eqOn) setEq(true); setPreset(act.dataset.p); return rerender(); }
     if (a === "eqReset") { setPreset("Flat"); return rerender(); }
@@ -306,7 +309,7 @@ view.addEventListener("click", e => {
     if (a === "deletePl" && pl) { if (confirm(`Delete “${pl.name}”?`)) { playlists = playlists.filter(p => p.id !== pl.id); store.set("playlists", playlists); subView = null; rerender(); } return; }
   }
   const item = e.target.closest("[data-ctx]");
-  if (item) { const list = lists[item.dataset.ctx]; if (list) playList(list, +item.dataset.i); }
+  if (item) { const list = lists[item.dataset.ctx]; if (list) { if (item.dataset.ctx === "search" && list[+item.dataset.i]) return playList([list[+item.dataset.i]], 0); playList(list, +item.dataset.i); } } // a song from search plays, then similar songs (autoplay) — not the other search results, which are mostly other copies of the same song
 });
 function newPlaylist(thenAdd) {
   const n = prompt("New playlist name", "My Playlist"); if (!n || !n.trim()) return null;
@@ -367,7 +370,7 @@ let loadToken = 0, stallTimer = null, userPaused = false;
 let resolved = store.get("resolved", {}); // oldId -> { url, sid } | { none: ts }
 
 // ---------- settings: quality ----------
-const cfg = Object.assign({ qWifi: "320", qCell: "96", qDl: "320", saver: false }, store.get("cfg", {}));
+const cfg = Object.assign({ qWifi: "320", qCell: "96", qDl: "320", saver: false, automix: true }, store.get("cfg", {}));
 const saveCfg = () => store.set("cfg", cfg);
 const QNAME = { "320": "High", "160": "Normal", "96": "Data saver", "48": "Lowest" };
 const conn = () => navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
@@ -796,12 +799,12 @@ function addToQueue(t, next) {
   if (next) queue.splice(qi + 1, 0, slim(t)); else queue.push(slim(t));
   saveQ(); renderQueue(); prepNext(); toast(next ? "Playing next" : "Added to queue");
 }
-const radioURL = t => `/api/radio?src=${t.src === "saavn" ? "saavn" : ""}&v=${encodeURIComponent(t.src === "saavn" ? t.id : (resolved[t.id] && resolved[t.id].sid) || t.id)}&artist=${encodeURIComponent(t.artist || "")}`;
+const radioURL = t => `/api/radio?src=${t.src === "saavn" ? "saavn" : ""}&v=${encodeURIComponent(t.src === "saavn" ? t.id : (resolved[t.id] && resolved[t.id].sid) || t.id)}&artist=${encodeURIComponent(t.artist || "")}&title=${encodeURIComponent(t.title || "")}`;
 async function startRadio(t) {
   toast("Starting station…");
   if (keepCur(t)) { queue = [queue[qi]]; qi = 0; autoplayAdded = new Set(); saveQ(); keepPlaying(); } // same song keeps playing from where it is
   else playList([t], 0);
-  try { const d = await api(radioURL(t)); const more = (d.items || []).filter(x => x.id !== t.id); queue = [queue[0], ...more.map(slim)]; qi = 0; saveQ(); renderQueue(); prepNext(); } catch (e) {}
+  try { const d = await api(radioURL(t)); const more = freshSongs(d.items, [t, queue[0]]); queue = [queue[0], ...more.map(slim)]; qi = 0; saveQ(); renderQueue(); prepNext(); } catch (e) {}
 }
 // Make sure the NEXT song already has a playable URL, so 'ended' can switch instantly (iOS freezes timers when locked)
 function prepNext() { const n = queue[qi + 1]; if (!n || isOff(n.id)) return; if (n.tg && isDl(n.id)) return; if (!urlOf(n) && !isYT(n) && navigator.onLine) resolveTrack(n); }
@@ -809,6 +812,7 @@ function status(msg) { $("#npStatus").textContent = msg || ""; }
 
 function loadCurrent(autoplay, startAt = 0) {
   const t = queue[qi]; if (!t) return;
+  mixAbort();
   const my = ++loadToken; userPaused = !autoplay;
   clearTimeout(stallTimer); stopYT(); mode = "audio";
   if (isOff(t.id)) { // saved on this phone: plays with no internet
@@ -889,10 +893,126 @@ const P = {
   time() { return mode === "yt" ? (ytPlayer && ytReady && ytPlayer.getCurrentTime ? ytPlayer.getCurrentTime() : 0) : audio.currentTime; },
   dur() { const t = queue[qi]; const d = mode === "yt" ? (ytPlayer && ytReady && ytPlayer.getDuration ? ytPlayer.getDuration() : 0) : audio.duration; return isFinite(d) && d > 0 ? d : (t && t.dur) || 0; },
   play() { userPaused = false; if (eqOn && mode === "audio") eqRoute(); if (mode === "yt") { ytPlayer && ytReady && ytPlayer.playVideo(); return; } if (!audio.src) return loadCurrent(true, resumeAt()); audio.play().catch(() => {}); },
-  pause() { userPaused = true; if (mode === "yt") { ytPlayer && ytReady && ytPlayer.pauseVideo(); return; } audio.pause(); },
-  seek(s) { if (mode === "yt") { ytPlayer && ytReady && ytPlayer.seekTo(s, true); } else { try { audio.currentTime = s; } catch (e) {} } tick(); },
+  pause() { userPaused = true; mixAbort(); if (mode === "yt") { ytPlayer && ytReady && ytPlayer.pauseVideo(); return; } audio.pause(); },
+  seek(s) { mixAbort(); if (mode === "yt") { ytPlayer && ytReady && ytPlayer.seekTo(s, true); } else { try { audio.currentTime = s; } catch (e) {} } tick(); },
 };
 const toggle = () => P.playing() ? P.pause() : P.play();
+// Same song, another release: JioSaavn lists one song many times ("Kesariya", "Kesariya (From \"Brahmastra\")", a compilation copy, "Zara Sa" ×2…).
+// songKey() is the song's name without the brackets / " - New Version" tail, so a copy of the song that just ended is never played next.
+function songKey(t) { const s = String((t && t.title) || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\s*[\(\[][^\)\]]*[\)\]]/g, " ").split(/\s+[-\u2013\u2014|]\s+/)[0].replace(/\s+(eclipsa audio|dolby atmos|spatial audio|8d audio|8d|lo-?fi( flip| mix| version)?|slowed( and| &| \+)?( reverb)?|reverb|sped up|remix(ed)?|unplugged|reprise|acoustic|(female|male|sad|duet|new) version|version|title track)(?=\s|$)/g, " ").replace(/[^\p{L}\p{N}]+/gu, ""); return s || "id:" + String(t && t.id); }
+function freshSongs(items, have) { const ids = new Set((have || []).filter(Boolean).map(x => x.id)), keys = new Set((have || []).filter(Boolean).map(songKey)); return (items || []).filter(x => x && x.id && !ids.has(x.id) && !keys.has(songKey(x)) && keys.add(songKey(x))); }
+// queue finished with repeat off: keep going with similar songs (Apple Music style autoplay) instead of stopping / replaying
+function autoEnd() {
+  userPaused = true; syncPlay();
+  const t = queue[qi]; if (!t || !navigator.onLine) return;
+  api(radioURL(t)).then(d => { if (queue[qi] !== t || P.playing()) return; const add = freshSongs(d.items, queue).slice(0, 20).map(slim); if (!add.length) return; queue.push(...add); qi++; saveQ(); loadCurrent(true); }).catch(() => {});
+}
+
+// ---------- AutoMix: songs blend into each other (Apple Music style) ----------
+// The next song starts on a second <audio> near the end of this one; both volumes move on an equal-power curve.
+// Length per transition is decided from the songs themselves: a cheap 48 kbps copy is decoded at 8 kHz to find
+// where the outro fades / goes silent and where the next song's sound really starts (clamped 2–10 s, 5 s when unknown).
+// Skipped (normal 'ended' switch, never a stop): Listen Together, repeat one, EQ on, YouTube songs, page hidden / locked,
+// iPhone browsers (Safari can't change an <audio> volume), and whenever the second song can't start.
+const mixVolOK = (() => { try { const x = document.createElement("audio"); x.volume = 0.5; return Math.abs(x.volume - 0.5) < 0.01; } catch (e) { return false; } })();
+let mixFade = null, mixPre = null, mixBusy = false; const mixPrepped = new Set();
+const mixInfo = new Map();
+const mixOn = () => cfg.automix !== false && mixVolOK;
+function mixSrcOf(t) {
+  if (!t) return "";
+  if (typeof isOff === "function" && isOff(t.id)) return offSrc(t.id);
+  if (!navigator.onLine || /forceyt=1/.test(location.search)) return "";
+  if (t.tg && isDl(t.id) && tgCode) return tgUrl(t.id);
+  const u = urlOf(t); return u && /^https?:/.test(u) ? withQ(u, curQ()) : "";
+}
+function mixAnaSrc(t) {
+  if (typeof isOff === "function" && isOff(t.id)) return offSrc(t.id); // file on the phone: free to read
+  if (cfg.saver || !navigator.onLine) return "";
+  const u = urlOf(t); return /saavncdn\.com\/.*_(320|160|96|48)\.mp4/.test(u || "") ? u.replace(/_(320|160|96|48)\.mp4/, "_48.mp4") : "";
+}
+function mixAnalyse(t) {
+  if (!t || !mixOn()) return null;
+  if (mixInfo.has(t.id)) return mixInfo.get(t.id);
+  const box = { v: undefined }; mixInfo.set(t.id, box);
+  if (mixInfo.size > 40) mixInfo.delete(mixInfo.keys().next().value);
+  const src = mixAnaSrc(t); if (!src) { box.v = null; return box; }
+  (async () => {
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext; if (!OAC) return null;
+    const r = await fetch(src); if (!r.ok) return null; const ab = await r.arrayBuffer();
+    const ctx = new OAC(1, 1, 8000);
+    const buf = await new Promise((res, rej) => { const p = ctx.decodeAudioData(ab, res, rej); if (p && p.then) p.then(res, rej); });
+    const sr = buf.sampleRate, w = Math.max(1, Math.round(sr * 0.1)), chs = [];
+    for (let c = 0; c < buf.numberOfChannels; c++) chs.push(buf.getChannelData(c));
+    const n = Math.floor(chs[0].length / w); if (n < 150) return null;
+    const db = new Float32Array(n);
+    for (let i = 0; i < n; i++) { let s = 0; for (const ch of chs) for (let k = i * w, e = k + w; k < e; k++) s += ch[k] * ch[k]; db[i] = 10 * Math.log10(s / (w * chs.length) + 1e-12); }
+    const ref = Array.from(db).sort((x, y) => x - y)[Math.floor(n * 0.7)]; // the song's usual loudness
+    const sil = Math.max(ref - 30, -65);
+    let h = 0; while (h < n && db[h] < sil) h++;
+    let e = n - 1; while (e > h && db[e] < sil) e--;
+    const avg = i => { let s = 0, c = 0; for (let k = Math.max(0, i - 9); k <= i; k++) { s += db[k]; c++; } return s / c; };
+    let o = e; while (o > h && e - o < 150 && avg(o) < ref - 9) o--; // outro = quiet tail before the sound ends
+    return { head: Math.min(h * 0.1, 8), end: (e + 1) * 0.1, outro: (e - o) * 0.1, dur: buf.duration };
+  })().then(v => { box.v = v || null; }, () => { box.v = null; });
+  return box;
+}
+function mixNextIndex() { // the song 'ended' would play next, or -1
+  if (repeat === 2 || !queue.length) return -1;
+  const k = songKey(queue[qi]); let j = qi + 1;
+  while (j < queue.length && songKey(queue[j]) === k) j++;
+  if (j < queue.length) return j;
+  if (repeat === 1 && queue.length > 1 && songKey(queue[0]) !== k) return 0;
+  return -1;
+}
+function mixDrop(el) { if (!el) return; try { el.pause(); el.removeAttribute("src"); el.load(); } catch (e) {} try { el.remove(); } catch (e) {} }
+function mixAbort() { // a seek / pause / skip mid-blend: the outgoing song stops, the new one goes to full volume
+  if (!mixFade) return; clearInterval(mixFade.iv); const o = mixFade.old; mixFade = null; mixDrop(o); try { audio.volume = 1; } catch (e) {}
+}
+function mixMaybe() {
+  if (mixFade || mixBusy || !mixOn() || mode !== "audio" || eqRouted || document.hidden || userPaused || audio.paused || (typeof jamOn === "function" && jamOn())) return;
+  const t = queue[qi], d = audio.duration; if (!t || !isFinite(d) || d < 40) return;
+  const ti = mixAnalyse(t), info = ti && ti.v;
+  const j = mixNextIndex(); if (j < 0) return;
+  const n = queue[j], url = mixSrcOf(n); if (!url) { if (!mixPrepped.has(n.id)) { mixPrepped.add(n.id); prepNext(); } return; }
+  const end = info ? Math.min(d, info.end) : d;
+  const L = info ? Math.min(10, Math.max(2, info.outro + 1)) : 5;
+  const rem = end - audio.currentTime;
+  if (rem > L + 30 || rem < 1) return;
+  const ni = mixAnalyse(n); // start reading the next song's intro now
+  if (!mixPre || mixPre.dataset.id !== n.id || mixPre.dataset.url !== url) { mixDrop(mixPre); mixPre = document.createElement("audio"); mixPre.setAttribute("playsinline", ""); mixPre.preload = "auto"; mixPre.dataset.id = n.id; mixPre.dataset.url = url; mixPre.volume = 0; mixPre.src = url; try { mixPre.load(); } catch (e) {} }
+  if (rem > L) return;
+  mixStart(j, n, url, Math.max(1, Math.min(L, rem)), ni && ni.v ? ni.v.head : 0);
+}
+function mixStart(j, n, url, L, head) {
+  const el = mixPre; mixPre = null; if (!el) return; mixBusy = true; const tok = loadToken;
+  el.volume = 0;
+  if (head > 0.3) { if (el.readyState >= 1) { try { el.currentTime = head; } catch (e) {} } else el.addEventListener("loadedmetadata", () => { try { if (el.currentTime < head) el.currentTime = head; } catch (e) {} }, { once: true }); }
+  let p; try { p = el.play(); } catch (e) { p = Promise.reject(e); }
+  Promise.resolve(p).then(() => {
+    mixBusy = false;
+    if (tok !== loadToken || mixFade || queue[j] !== n || audio.paused || userPaused || mode !== "audio") { mixDrop(el); return; } // something changed meanwhile (skip, pause, song already ended)
+    mixCommit(j, n, url, el, L);
+  }, () => { mixBusy = false; mixDrop(el); }); // couldn't start: the normal 'ended' switch takes over
+}
+function mixCommit(j, t, url, el, L) {
+  const old = audio;
+  qi = j; saveQ();
+  const my = ++loadToken; userPaused = false; clearTimeout(stallTimer);
+  old.onerror = null; old.onplaying = null; old.id = "audioOut";
+  el.id = "audio"; old.after(el); audio = el; wireAudio(el);
+  el.onerror = () => { if (my === loadToken) onFail(t, url, my, 0, true, 0); };
+  el.onplaying = () => { if (my !== loadToken) return; clearTimeout(stallTimer); status(""); prepNext(); syncQ(); };
+  updateMeta(t); addRecent(t); renderQueue(); highlightRows(); maybeAutoplayFill(); syncDlBtn(); syncQ(url); syncPlay(); prepNext();
+  const v0 = old.volume, t0 = Date.now(), ms = L * 1000;
+  const step = () => {
+    const x = Math.min(1, (Date.now() - t0) / ms);
+    try { old.volume = v0 * Math.cos(x * Math.PI / 2); el.volume = Math.sin(x * Math.PI / 2); } catch (e) {}
+    if (x >= 1 || old.ended) { const f = mixFade; mixFade = null; if (f) clearInterval(f.iv); mixDrop(old); try { el.volume = 1; } catch (e) {} }
+  };
+  mixFade = { old, el, iv: setInterval(step, 50) }; step();
+  mixAnalyse(t);
+}
+setInterval(() => { if (!document.hidden && !audio.paused) mixMaybe(); }, 500);
 function next(auto) {
   if (!queue.length) return;
   if (auto && repeat === 2) { P.seek(0); return P.play(); }
@@ -900,17 +1020,19 @@ function next(auto) {
     let j = queue.findIndex((x, k) => k > qi && isOff(x.id)); if (j < 0 && (repeat === 1 || !auto)) j = queue.findIndex(x => isOff(x.id));
     if (j >= 0) { qi = j; saveQ(); return loadCurrent(true); }
   }
-  if (qi < queue.length - 1) qi++;
+  let j = qi + 1;
+  if (auto) { const k = songKey(queue[qi]); while (j < queue.length && songKey(queue[j]) === k) j++; } // skip copies of the song that just ended
+  if (j < queue.length) qi = j;
   else if (repeat === 1 || !auto) qi = 0;
-  else { userPaused = true; syncPlay(); return; }
+  else return autoEnd();
   saveQ(); loadCurrent(true);
 }
 function prev() { if (P.time() > 3 || qi === 0) { P.seek(0); return; } qi--; saveQ(); loadCurrent(true); }
 async function maybeAutoplayFill() {
   // Like Apple Music autoplay: when near the end of the queue, add similar songs.
-  const t = queue[qi]; if (!t || queue.length - qi > 2 || repeat || autoplayAdded.has(t.id)) return;
+  const t = queue[qi]; if (!t || queue.length - qi > 2 || repeat === 2 || (repeat === 1 && queue.length > 1) || autoplayAdded.has(t.id)) return;
   autoplayAdded.add(t.id);
-  try { const d = await api(radioURL(t)); const have = new Set(queue.map(x => x.id)); const add = (d.items || []).filter(x => !have.has(x.id)).slice(0, 20).map(slim); if (add.length) { queue.push(...add); saveQ(); renderQueue(); prepNext(); } } catch (e) {}
+  try { const d = await api(radioURL(t)); const add = freshSongs(d.items, queue).slice(0, 20).map(slim); if (add.length) { queue.push(...add); saveQ(); renderQueue(); prepNext(); } } catch (e) {}
 }
 
 // ---------- UI sync ----------
@@ -1653,7 +1775,7 @@ function jamErr(msg) { const e = document.getElementById("jamErr"); if (e) { e.t
 async function jamPrefetchFill() {
   const st = jam && jam.st; if (!st || !st.song || (st.queue || []).length || jamFillFor === st.song.id) return;
   const sid = st.song.id; jamFillFor = sid; jamFill = null;
-  try { const d = await api(radioURL(st.song)); if (jamFillFor === sid) jamFill = (d.items || []).filter(x => x.id !== sid).slice(0, 15).map(jamSlim); } catch (e) { jamFillFor = ""; }
+  try { const d = await api(radioURL(st.song)); if (jamFillFor === sid) jamFill = freshSongs(d.items, [st.song]).slice(0, 15).map(jamSlim); } catch (e) { jamFillFor = ""; }
 }
 // ----- the player's controls, routed through the room while a session is on -----
 const rawPlay = P.play, rawPause = P.pause, rawSeek = P.seek;
@@ -1681,11 +1803,18 @@ const rawNext = next, rawPrev = prev, rawPlayList = playList, rawAddToQueue = ad
 next = function (auto) {
   if (!jamOn()) return rawNext(auto);
   const st = jam.st; if (!st || !st.song) return;
-  const fill = (st.queue || []).length ? null : (jamFill || []);
-  const nx = (st.queue || [])[0] || (fill && fill[0]);
-  if (!nx) { if (auto) { userPaused = true; syncPlay(); } else toast("Queue khali hai — koi gaana chalao"); jamAct(auto ? { t: "ended", id: st.song.id } : { t: "next" }); return; }
+  const k = songKey(st.song); let q0 = st.queue || [];
+  if (auto) { let i = 0; while (i < q0.length && songKey(q0[i]) === k) i++; q0 = q0.slice(i); } // never "next" into a copy of the song that just ended
+  const fill = q0.length ? null : (jamFillFor === st.song.id ? (jamFill || []) : []).filter(x => songKey(x) !== k);
+  const nx = q0[0] || (fill && fill[0]);
+  if (!nx && auto) { // room queue empty and no similar songs ready yet: fetch them now, then move the room on
+    userPaused = true; syncPlay(); const sid = st.song.id;
+    api(radioURL(st.song)).then(d => { if (!jamOn() || !jam.st || !jam.st.song || jam.st.song.id !== sid) return; jamFillFor = sid; jamFill = freshSongs(d.items, [st.song]).slice(0, 15).map(jamSlim); if (jamFill.length) next(true); else jamAct({ t: "ended", id: sid }); }).catch(() => jamAct({ t: "ended", id: sid }));
+    return;
+  }
+  if (!nx) { toast("Queue khali hai — koi gaana chalao"); jamAct({ t: "next" }); return; }
   const a = auto ? { t: "ended", id: st.song.id } : { t: "next" }; if (fill) a.fill = fill;
-  jamPredict(s => { if (s.song) s.hist = (s.hist || []).concat([s.song]).slice(-30); const q = (s.queue && s.queue.length) ? s.queue : (fill || []); s.song = q[0]; s.queue = q.slice(1); s.pos = 0; s.playing = true; s.by = { m: jamMid, n: jamName() }; });
+  jamPredict(s => { if (s.song) s.hist = (s.hist || []).concat([s.song]).slice(-30); const q = q0.length ? q0.map(x => JSON.parse(JSON.stringify(x))) : (fill || []); s.song = q[0]; s.queue = q.slice(1); s.pos = 0; s.playing = true; s.by = { m: jamMid, n: jamName() }; });
   jamAct(a);
 };
 prev = function () {
@@ -1719,7 +1848,7 @@ startRadio = function (t) {
   toast("Station shuru ho raha hai…");
   const track = jamSlim(t), same = !!(jam.st && jam.st.song && jam.st.song.id === track.id && keepCur(track));
   api(radioURL(t)).then(d => {
-    const more = (d.items || []).filter(x => x.id !== t.id).slice(0, 50).map(jamSlim);
+    const more = freshSongs(d.items, [t]).slice(0, 50).map(jamSlim);
     if (!jamOn()) return rawStartRadio(t);
     jamPredict(s => { if (same) { s.pos = jamExp(s); s.playing = true; } else { if (s.song) s.hist = (s.hist || []).concat([s.song]).slice(-30); s.song = track; s.pos = 0; s.playing = true; } s.queue = more; });
     jamAct({ t: "song", track, list: more, rq: 1 });
@@ -1870,6 +1999,7 @@ document.addEventListener("click", e => { if (e.target.closest("[data-act=jamCha
   }
   if (saved && saved.code) jamJoin(saved.code, true);
 })();
+window.__mix = { info: id => { const b = mixInfo.get(id); return b ? b.v : undefined; }, get on() { return mixOn(); } };
 window.__jam = { get jam() { return jam; }, get off() { return jamOff; }, exp: () => jam && jamExp(jam.st), check: jamCheck, get chat() { return jamMsgs; }, get unread() { return jamUnread; } };
 
 // storage: an update APK left in the app cache after installing is removed (it is ~5 MB and never needed again)

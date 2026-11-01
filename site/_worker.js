@@ -175,12 +175,14 @@ async function svPlaylistByQuery(q, n = 25) {
 }
 async function svTrending() { const j = await sv("content.getTrending", { entity_type: "song", entity_language: "hindi" }); return svList(Array.isArray(j) ? j : j.data); }
 async function svSong(id) { const j = await sv("song.getDetails", { pids: id }); const x = j.songs ? j.songs[0] : j[id]; return svTrack(x); }
-async function svRadio(id, artist, lang) {
+const songKey = t => String((t && t.title) || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\s*[\(\[][^\)\]]*[\)\]]/g, " ").split(/\s+[-\u2013\u2014|]\s+/)[0].replace(/\s+(eclipsa audio|dolby atmos|spatial audio|8d audio|8d|lo-?fi( flip| mix| version)?|slowed( and| &| \+)?( reverb)?|reverb|sped up|remix(ed)?|unplugged|reprise|acoustic|(female|male|sad|duet|new) version|version|title track)(?=\s|$)/g, " ").replace(/[^\p{L}\p{N}]+/gu, "") || "id:" + String(t && t.id); // same song, other release ("(From …)", compilation copy, " - New Version")
+async function svRadio(id, artist, lang, title) {
   let items = [];
   try { const r = await sv("reco.getreco", { pid: id }); items = svList(Array.isArray(r) ? r : []); } catch (e) {}
   if (items.length < 5 && artist) { try { items = items.concat(await svSearch(artist.split(",")[0].trim(), 30)); } catch (e) {} }
   if (items.length < 5) { try { items = items.concat(await svTrending()); } catch (e) {} }
-  const seen = new Set([id]); return items.filter(t => !seen.has(t.id) && seen.add(t.id));
+  const seen = new Set([id]), keys = new Set(title ? [songKey({ title })] : []); // one copy of each song, never the seed song again
+  return items.filter(t => !seen.has(t.id) && seen.add(t.id) && !keys.has(songKey(t)) && keys.add(songKey(t)));
 }
 async function svSuggest(q) {
   const j = await sv("autocomplete.get", { query: q });
@@ -1052,7 +1054,9 @@ function jamApply(st, a, who, now) { // returns true if the state changed
   }
   if (t === "next" || t === "ended") {
     if (t === "ended" && (!st.song || st.song.id !== String(a.id || ""))) return false; // someone already moved on
-    let q = st.queue || []; if (!q.length) q = fillQ(a.fill);
+    let q = st.queue || [];
+    if (t === "ended" && st.song) { const k = songKey(st.song); let i = 0; while (i < q.length && songKey(q[i]) === k) i++; q = q.slice(i); if (!q.length) q = fillQ(a.fill).filter(x => songKey(x) !== k); } // never 'next' into a copy of the song that just ended
+    if (!q.length) q = fillQ(a.fill);
     const s = q[0] || null; st.queue = q.slice(1);
     if (!s) { if (t === "ended") { st.pos = 0; st.at = now; st.playing = false; ev("stop"); return true; } return false; }
     startSong(s, t); return true;
@@ -1210,9 +1214,9 @@ export default {
       if (p === "/api/suggest") { try { return J({ items: await svSuggest(q) }, 200, 3600); } catch (e) { try { return J({ items: await suggest(q) }, 200, 3600); } catch (e2) { return J({ items: [] }); } } }
       if (p === "/api/radio") {
         const src = u.searchParams.get("src") || "";
-        if (src === "saavn" || !/^[\w-]{11}$/.test(v)) { try { return J({ items: await svRadio(v || id, u.searchParams.get("artist") || "", "") }, 200, 1800); } catch (e) { return J({ items: [], error: String(e) }); } }
+        if (src === "saavn" || !/^[\w-]{11}$/.test(v)) { try { return J({ items: await svRadio(v || id, u.searchParams.get("artist") || "", "", u.searchParams.get("title") || "") }, 200, 1800); } catch (e) { return J({ items: [], error: String(e) }); } }
         // legacy YouTube track: recommend from JioSaavn by artist
-        try { return J({ items: await svRadio("", u.searchParams.get("artist") || q, "") }, 200, 1800); } catch (e) { return J({ items: [] }); }
+        try { return J({ items: await svRadio("", u.searchParams.get("artist") || q, "", u.searchParams.get("title") || "") }, 200, 1800); } catch (e) { return J({ items: [] }); }
       }
       if (p === "/api/home") {
         const shelves = await Promise.all(SHELVES.map(async ([title, how, query]) => {
