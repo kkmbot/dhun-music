@@ -1006,11 +1006,130 @@ async function svPlaylist(id) {
   if (o.items.length) memSet(k, o, 3600); return o;
 }
 
+// ---------- Listen Together (Jam): shared rooms in D1, clients poll ~1.5 s and sync by server time ----------
+const JAM_MAX = 10, JAM_TTL = 6 * 3600e3, JAM_ALIVE = 30e3, JAM_ABC = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+let jamReady = null;
+function jamDb(env) {
+  if (!env.DB) throw new Error("store missing");
+  const d = env.DB;
+  if (!jamReady) jamReady = d.batch([
+    d.prepare("CREATE TABLE IF NOT EXISTS jam (code TEXT PRIMARY KEY, st TEXT, rev INTEGER, created INTEGER, upd INTEGER)"),
+    d.prepare("CREATE TABLE IF NOT EXISTS jamm (code TEXT, mid TEXT, name TEXT, seen INTEGER, joined INTEGER, PRIMARY KEY (code, mid))"),
+  ]).catch(e => { jamReady = null; throw e; });
+  return jamReady.then(() => d);
+}
+const jamStr = (s, n) => String(s ?? "").slice(0, n);
+const jamHttps = (s, n) => { s = jamStr(s, n); return /^https:\/\//.test(s) ? s : ""; };
+function jamTrack(t) {
+  if (!t || typeof t !== "object" || !t.id) return null;
+  const o = { id: jamStr(t.id, 80), title: jamStr(t.title, 200), artist: jamStr(t.artist, 200), album: jamStr(t.album, 200), dur: Math.max(0, Math.min(36000, Number(t.dur) || 0)), thumb: jamHttps(t.thumb, 600) };
+  const url = jamHttps(t.url, 1200); if (url) o.url = url;
+  if (t.src) o.src = jamStr(t.src, 12); if (t.sid) o.sid = jamStr(t.sid, 80); if (t.lang) o.lang = jamStr(t.lang, 30);
+  return o;
+}
+const jamList = (a, n) => (Array.isArray(a) ? a : []).map(jamTrack).filter(Boolean).slice(0, n);
+const jamName = s => jamStr(String(s || "").replace(/[\u0000-\u001f<>]/g, "").trim(), 24) || "Dost";
+const jamMid = s => /^[\w-]{6,40}$/.test(String(s || "")) ? String(s) : "";
+const jamPos = (st, now) => !st.song ? 0 : Math.max(0, st.playing ? st.pos + (now - st.at) / 1000 : st.pos);
+function jamApply(st, a, who, now) { // returns true if the state changed
+  const t = String(a && a.t || ""), cur = jamPos(st, now);
+  const ev = (x, extra) => { st.ev = Object.assign({ t: x }, extra || {}); st.by = who; };
+  const startSong = (song, x) => { if (st.song && (!song || song.id !== st.song.id)) { st.hist = (st.hist || []).concat([st.song]).slice(-30); } st.song = song; st.pos = 0; st.at = now; st.playing = !!song; ev(x, { title: song ? song.title : "" }); };
+  const fillQ = f => { const l = jamList(f, 30); return l; };
+  if (t === "play") { if (!st.song) return false; st.pos = a.pos != null && isFinite(+a.pos) ? Math.max(0, +a.pos) : cur; st.at = now; st.playing = true; ev("play"); return true; }
+  if (t === "pause") { if (!st.song) return false; st.pos = a.pos != null && isFinite(+a.pos) ? Math.max(0, +a.pos) : cur; st.at = now; st.playing = false; ev("pause"); return true; }
+  if (t === "seek") { if (!st.song || !isFinite(+a.pos)) return false; st.pos = Math.max(0, +a.pos); st.at = now; ev("seek", { from: Math.round(cur), to: Math.round(st.pos) }); return true; }
+  if (t === "song") { const s = jamTrack(a.track); if (!s) return false; st.queue = (st.queue || []).filter(x => x.id !== s.id); if (!st.queue.length && a.list) st.queue = jamList(a.list, 100).filter(x => x.id !== s.id); startSong(s, "song"); return true; }
+  if (t === "next" || t === "ended") {
+    if (t === "ended" && (!st.song || st.song.id !== String(a.id || ""))) return false; // someone already moved on
+    let q = st.queue || []; if (!q.length) q = fillQ(a.fill);
+    const s = q[0] || null; st.queue = q.slice(1);
+    if (!s) { if (t === "ended") { st.pos = 0; st.at = now; st.playing = false; ev("stop"); return true; } return false; }
+    startSong(s, t); return true;
+  }
+  if (t === "prev") { const h = st.hist || []; if (!h.length) { st.pos = 0; st.at = now; ev("seek", { from: Math.round(cur), to: 0 }); return true; } const s = h.pop(); st.hist = h; if (st.song) st.queue = [st.song].concat(st.queue || []).slice(0, 100); st.song = s; st.pos = 0; st.at = now; st.playing = true; ev("prev", { title: s.title }); return true; }
+  if (t === "add") { const s = jamTrack(a.track); if (!s) return false; if (!st.song) { st.queue = st.queue || []; startSong(s, "song"); return true; } st.queue = st.queue || []; if (st.queue.length >= 100) return false; if (a.next) st.queue.unshift(s); else st.queue.push(s); ev("add", { title: s.title, next: !!a.next }); return true; }
+  if (t === "rm" || t === "qplay" || t === "top") {
+    const q = st.queue || [], i = Number(a.i); if (!(i >= 0 && i < q.length) || q[i].id !== String(a.id || "")) return false;
+    const [s] = q.splice(i, 1);
+    if (t === "rm") { st.queue = q; ev("rm", { title: s.title }); return true; }
+    if (t === "top") { q.unshift(s); st.queue = q; ev("top", { title: s.title }); return true; }
+    st.queue = q; startSong(s, "song"); return true;
+  }
+  if (t === "shuffle") { const q = (st.queue || []).slice(); for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; } st.queue = q; ev("shuffle"); return true; }
+  if (t === "clear") { st.queue = []; ev("clear"); return true; }
+  return false;
+}
+async function jamRead(d, code, now) {
+  const [r, m] = await d.batch([
+    d.prepare("SELECT st, rev, upd FROM jam WHERE code = ?").bind(code),
+    d.prepare("SELECT mid, name, seen, joined FROM jamm WHERE code = ? AND seen > ? ORDER BY joined").bind(code, now - JAM_ALIVE),
+  ]);
+  const row = r.results && r.results[0]; if (!row) return null;
+  const mem = (m.results || []).map(x => ({ m: x.mid, n: x.name, j: x.joined }));
+  if (row.upd < now - JAM_TTL && !mem.length) return null;
+  let st = {}; try { st = JSON.parse(row.st) || {}; } catch (e) {}
+  return { rev: row.rev, st, mem };
+}
+const jamOut = (code, x, extra) => J(Object.assign({ ok: true, code, rev: x.rev, st: x.st, mem: x.mem, now: Date.now() }, extra || {}));
+async function jamRoute(p, req, env, u) {
+  const now0 = Date.now();
+  if (p === "/api/jam/t") return J({ now: Date.now() });
+  const d = await jamDb(env);
+  const b = req.method === "POST" ? await impBody(req) : {};
+  const code = jamStr(b.c || u.searchParams.get("c") || "", 12).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const mid = jamMid(b.m || u.searchParams.get("m")), name = jamName(b.n || u.searchParams.get("n"));
+  const touch = () => d.prepare("INSERT INTO jamm (code, mid, name, seen, joined) VALUES (?, ?, ?, ?, ?) ON CONFLICT(code, mid) DO UPDATE SET seen = excluded.seen, name = excluded.name").bind(code, mid, name, Date.now(), Date.now()).run();
+  if (p === "/api/jam/new" && req.method === "POST") {
+    if (!mid) return J({ ok: false, msg: "bad member" }, 400);
+    const now = Date.now(), s0 = b.st || {}, song = jamTrack(s0.song);
+    const st = { song, playing: !!(song && s0.playing), pos: song ? Math.max(0, Number(s0.pos) || 0) : 0, at: now, queue: jamList(s0.queue, 100), hist: [], by: { m: mid, n: name }, ev: { t: "start" } };
+    let code2 = "";
+    for (let k = 0; k < 6 && !code2; k++) {
+      const c = Array.from(crypto.getRandomValues(new Uint8Array(6)), x => JAM_ABC[x % JAM_ABC.length]).join("");
+      const r = await d.prepare("INSERT OR IGNORE INTO jam (code, st, rev, created, upd) VALUES (?, ?, 1, ?, ?)").bind(c, JSON.stringify(st), now, now).run();
+      if (r.meta && r.meta.changes) code2 = c;
+    }
+    if (!code2) return J({ ok: false, msg: "try again" }, 503);
+    await d.prepare("INSERT OR REPLACE INTO jamm (code, mid, name, seen, joined) VALUES (?, ?, ?, ?, ?)").bind(code2, mid, name, now, now).run();
+    if (Math.random() < 0.2) { const old = now - JAM_TTL; try { await d.batch([d.prepare("DELETE FROM jam WHERE upd < ? AND code NOT IN (SELECT code FROM jamm WHERE seen > ?)").bind(old, old), d.prepare("DELETE FROM jamm WHERE seen < ?").bind(old)]); } catch (e) {} }
+    return jamOut(code2, await jamRead(d, code2, Date.now()));
+  }
+  if (!/^[A-Z0-9]{6}$/.test(code)) return J({ ok: false, gone: true, msg: "Code galat hai" });
+  if (p === "/api/jam/get") {
+    if (mid && (b.hb || u.searchParams.get("hb"))) { const x = await d.prepare("SELECT 1 AS k FROM jamm WHERE code = ? AND mid = ?").bind(code, mid).first(); if (x) await touch(); }
+    const x = await jamRead(d, code, Date.now()); if (!x) return J({ ok: false, gone: true, now: Date.now() });
+    const r = Number(u.searchParams.get("r") || b.r || 0);
+    if (r && r === x.rev) return J({ ok: true, code, rev: x.rev, same: 1, mem: x.mem, now: Date.now() });
+    return jamOut(code, x);
+  }
+  if (!mid) return J({ ok: false, msg: "bad member" }, 400);
+  if (p === "/api/jam/join" && req.method === "POST") {
+    const x = await jamRead(d, code, Date.now()); if (!x) return J({ ok: false, gone: true, msg: "Ye session khatam ho gaya ya code galat hai" });
+    if (x.mem.length >= JAM_MAX && !x.mem.some(m => m.m === mid)) return J({ ok: false, full: true, msg: `Session full hai (${JAM_MAX} log)` });
+    await touch();
+    return jamOut(code, await jamRead(d, code, Date.now()));
+  }
+  if (p === "/api/jam/leave" && req.method === "POST") { await d.prepare("DELETE FROM jamm WHERE code = ? AND mid = ?").bind(code, mid).run(); return J({ ok: true }); }
+  if (p === "/api/jam/act" && req.method === "POST") {
+    for (let k = 0; k < 5; k++) {
+      const x = await jamRead(d, code, Date.now()); if (!x) return J({ ok: false, gone: true });
+      const now = Date.now(), st = x.st;
+      if (!jamApply(st, b.a || {}, { m: mid, n: name }, now)) return jamOut(code, x, { nochange: true });
+      const r = await d.prepare("UPDATE jam SET st = ?, rev = rev + 1, upd = ? WHERE code = ? AND rev = ?").bind(JSON.stringify(st), now, code, x.rev).run();
+      if (r.meta && r.meta.changes) { try { await touch(); } catch (e) {} return jamOut(code, { rev: x.rev + 1, st, mem: x.mem }); }
+    }
+    return J({ ok: false, msg: "busy" }, 409);
+  }
+  return J({ ok: false }, 404);
+}
+
 export default {
   async fetch(req, env, ctx) {
     loadConfig(env, req);
     const u = new URL(req.url), p = u.pathname, q = (u.searchParams.get("q") || "").slice(0, 200), v = u.searchParams.get("v") || "", id = u.searchParams.get("id") || "";
     try {
+      if (p.startsWith("/api/jam/")) return await jamRoute(p, req, env, u); // Listen Together
       if (p === "/api/u/hist") return await userHist(env, ctx, await impBody(req)); // per-user listening history (signed-in)
       if (p.startsWith("/api/tg/") || p.startsWith("/api/u/")) return await tgRoute(p, req, env, u, ctx);
       if (p === "/api/app-version") { // Android in-app updater; values live in /app-version.json (edit that file + swap /dhun.apk to ship a new version)

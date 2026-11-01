@@ -349,3 +349,64 @@ button,input,select,textarea{font-family:inherit}
 .rcEmpty{text-align:center;padding:26px 18px}
 .rcEm{font-size:44px}
 .rcEmpty p{color:var(--sub);font-size:14px;line-height:1.45;margin:8px 0 0}
+
+/* ---- Listen Together (v17) ---- */
+#npJam{position:relative}
+#npJam svg{width:24px;height:24px;fill:currentColor}
+#npJam.on{color:#fff;background:rgba(250,45,72,.35);border-radius:8px}
+#npJam .jamBadge{position:absolute;top:-3px;right:-5px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--acc);color:#fff;font-size:10.5px;line-height:16px;font-weight:700}
+#npJam .jamBadge:empty{display:none}
+#npJamBar{display:flex;align-items:center;gap:8px;margin:6px auto 0;padding:6px 12px 6px 6px;border-radius:20px;background:rgba(255,255,255,.14);color:#fff;font-size:13.5px;max-width:100%}
+#npJamBar.hidden{display:none}
+.jamBarT{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jamCodeS{font-weight:700;letter-spacing:1.5px;background:rgba(0,0,0,.28);padding:2px 7px;border-radius:8px;font-size:12px}
+.jamAvs{display:inline-flex;flex:none}
+.jamAv{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;color:#fff;font-style:normal;font-weight:700;font-size:12px;box-shadow:0 0 0 2px rgba(30,30,32,.95);flex:none}
+.jamAvs .jamAv+.jamAv{margin-left:-6px}
+.jamAv.more{background:#48484a;font-size:10px}
+.jamAv.big{width:34px;height:34px;font-size:15px;box-shadow:none}
+#mini.jamming::after{content:"🎧";position:absolute;left:4px;top:-8px;font-size:13px;background:var(--acc);border-radius:9px;padding:1px 4px;line-height:15px}
+.jamSheet{max-height:calc(100vh - 150px - var(--st));overflow:auto}
+.jamHead{display:flex;gap:12px;align-items:flex-start;padding:14px 16px 12px;border-bottom:.5px solid var(--line)}
+.jamHead b{font-size:18px}
+.jamHead .sub{color:var(--sub);font-size:13.5px;margin-top:3px;line-height:1.35}
+.jamIco{flex:none;width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#fa2d48,#a033ff);display:flex;align-items:center;justify-content:center;font-style:normal}
+.jamIco svg{width:24px;height:24px;fill:#fff}
+.jamLive{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:7px;background:var(--acc);color:#fff;font-size:11px;letter-spacing:1px;vertical-align:3px}
+.jamBody{padding:12px 16px 16px}
+.jamBody label{display:block;color:var(--sub);font-size:13px;margin:2px 0 6px}
+.jamBody input{width:100%;box-sizing:border-box;font-size:17px;padding:12px 14px;border-radius:12px;border:.5px solid #48484a;background:#1c1c1e;color:#fff;outline:none}
+.jamBody input:focus{border-color:var(--acc)}
+.jamPri,.jamSec{display:block;width:100%;margin-top:12px;padding:13px 0;border-radius:12px;font-size:17px;font-weight:700;text-align:center}
+.jamPri{background:var(--acc);color:#fff}
+.jamSec{background:#3a3a3c;color:#fff}
+.jamPri:active,.jamSec:active{opacity:.7}
+.jamOr{display:flex;align-items:center;gap:10px;color:var(--sub);font-size:13px;margin:16px 0 4px}
+.jamOr::before,.jamOr::after{content:"";flex:1;height:.5px;background:var(--line)}
+.jamJoinRow{display:flex;gap:10px;align-items:stretch}
+.jamJoinRow input{flex:1;letter-spacing:3px;text-transform:uppercase;font-weight:700;text-align:center}
+.jamJoinRow .jamSec{width:96px;flex:none;margin-top:0}
+.jamInv{background:#1c1c1e;border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:15px;line-height:1.4}
+.jamNow{display:flex;gap:10px;align-items:center;margin-top:8px}
+.jamNow img{width:44px;height:44px;border-radius:6px;object-fit:cover}
+.jamNow b{display:block;font-size:14.5px}
+.jamNow small{color:var(--sub);font-size:12.5px}
+.jamCodeBox{text-align:center;padding:14px 16px 6px}
+.jamCodeBox small{color:var(--sub);font-size:13px}
+.jamCodeBig{font-size:36px;font-weight:700;letter-spacing:7px;margin:2px 0;-webkit-user-select:text;user-select:text}
+.jamShare{display:flex;gap:8px;padding:10px 16px 6px}
+.jamShare a,.jamShare button{flex:1;text-align:center;padding:11px 0;border-radius:12px;font-size:15px;font-weight:700;color:#fff;text-decoration:none;background:#3a3a3c}
+.jamShare .jamWa{background:#1faa53}
+.jamShare .jamTg{background:#229ed9}
+.jamMemH{color:var(--sub);font-size:13px;padding:12px 16px 4px}
+#jamMem{padding:0 16px 12px}
+.jamMemRow{display:flex;align-items:center;gap:12px;padding:7px 0;font-size:16px}
+.jamMemRow small{color:var(--sub);font-size:13px}
+.jamMemRow .jamLast{margin-left:auto;color:var(--acc)}
+.libLinks button.jamRow .jamRowI{width:24px;display:inline-flex;justify-content:center;font-style:normal;flex:none}
+.libLinks button.jamRow .jamRowI svg{width:24px;height:24px;fill:var(--acc)}
+.libLinks button.jamRow>span:not(.jamAvs){flex:1}
+.libLinks button.jamRow.on .sub{color:var(--acc)}
+.jamHome{display:flex;align-items:center;gap:12px;margin:2px 20px 14px;width:calc(100% - 40px);padding:11px 14px;border-radius:14px;background:linear-gradient(135deg,rgba(250,45,72,.28),rgba(160,51,255,.24));text-align:left}
+.jamHome b{display:block;font-size:16px}
+.jamHome small{color:rgba(255,255,255,.75);font-size:13px}

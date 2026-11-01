@@ -504,15 +504,25 @@ function offDownload(t, quiet) {
   if (offJobs.has(t.id)) return;
   if (!navigator.onLine) { if (!quiet) toast("You're offline"); return; }
   offJobs.set(t.id, 0); offWait.push(slim(t)); pumpOff();
-  if (!quiet) toast(`Downloading “${t.title}”…`);
+  const tgToo = offAlsoTg(t);
+  if (!quiet) toast(tgToo === "nolink" ? `Downloading “${t.title}”… · Telegram connect karo to wahan bhi milega` : `Downloading “${t.title}”…${tgToo === "sent" ? " + Telegram pe bhi bhej rahe hain" : ""}`, tgToo === "nolink" ? 3500 : 2200);
   dlUi();
+}
+// a phone download also goes to the user's Telegram chat with the bot (same as the website's Telegram download; cached in the storage group)
+function offAlsoTg(t) {
+  if (!t || isYT(t)) return "";
+  if (!tgMe.linked || !tgCode) return "nolink";
+  if (isDl(t.id) || dlJobs.has(t.id)) return "have";
+  dlJobs.set(t.id, { p: 0, t: slim(t) }); dlWait.push(t); pumpDl(); return "sent";
 }
 function offDownloadAll(list) {
   const todo = list.filter(t => !isYT(t) && !isOff(t.id) && !offJobs.has(t.id));
   if (!todo.length) return toast("All already on your phone ✓");
   if (!navigator.onLine) return toast("You're offline");
   offBatch = { n: todo.length, ok: 0, fail: 0 };
-  todo.forEach(t => offDownload(t, true)); toast(`Downloading ${todo.length} song${todo.length > 1 ? "s" : ""}…`);
+  const tgTodo = tgMe.linked && tgCode ? todo.filter(t => !isDl(t.id) && !dlJobs.has(t.id)) : [];
+  if (tgTodo.length && !dlBatch) dlBatch = { n: tgTodo.length, ok: 0, fail: 0 };
+  todo.forEach(t => offDownload(t, true)); toast(`Downloading ${todo.length} song${todo.length > 1 ? "s" : ""}…${tgTodo.length ? " + Telegram pe bhi" : (!tgMe.linked ? " · Telegram connect karo to wahan bhi milenge" : "")}`, 3500);
 }
 function pumpOff() {
   while (offActive < 2 && offWait.length) {
@@ -871,7 +881,7 @@ const P = {
   playing() { return mode === "yt" ? (ytPlayer && ytReady && ytPlayer.getPlayerState && ytPlayer.getPlayerState() === 1) : !audio.paused; },
   time() { return mode === "yt" ? (ytPlayer && ytReady && ytPlayer.getCurrentTime ? ytPlayer.getCurrentTime() : 0) : audio.currentTime; },
   dur() { const t = queue[qi]; const d = mode === "yt" ? (ytPlayer && ytReady && ytPlayer.getDuration ? ytPlayer.getDuration() : 0) : audio.duration; return isFinite(d) && d > 0 ? d : (t && t.dur) || 0; },
-  play() { userPaused = false; if (eqOn && mode === "audio") eqRoute(); if (mode === "yt") { ytPlayer && ytReady && ytPlayer.playVideo(); return; } if (!audio.src) return loadCurrent(true, store.get("pos", 0)); audio.play().catch(() => {}); },
+  play() { userPaused = false; if (eqOn && mode === "audio") eqRoute(); if (mode === "yt") { ytPlayer && ytReady && ytPlayer.playVideo(); return; } if (!audio.src) return loadCurrent(true, resumeAt()); audio.play().catch(() => {}); },
   pause() { userPaused = true; if (mode === "yt") { ytPlayer && ytReady && ytPlayer.pauseVideo(); return; } audio.pause(); },
   seek(s) { if (mode === "yt") { ytPlayer && ytReady && ytPlayer.seekTo(s, true); } else { try { audio.currentTime = s; } catch (e) {} } tick(); },
 };
@@ -925,7 +935,7 @@ function tick() {
   $("#miniProg div").style.width = pct + "%";
   if (!seeking) { const s = $("#seek"); s.value = d ? Math.round(cur / d * 1000) : 0; s.style.setProperty("--p", pct + "%"); $("#tCur").textContent = fmt(cur); $("#tDur").textContent = "-" + fmt(Math.max(0, d - cur)); }
   if ("mediaSession" in navigator && navigator.mediaSession.setPositionState && d && isFinite(d)) { try { navigator.mediaSession.setPositionState({ duration: d, position: Math.min(cur, d), playbackRate: 1 }); } catch (e) {} }
-  if (Date.now() - lastPosSave > 4000) { lastPosSave = Date.now(); store.set("pos", cur); }
+  if (Date.now() - lastPosSave > 3000) { lastPosSave = Date.now(); savePos(); } // resume point (saved only once a song is really loaded)
 }
 function highlightRows() { const id = queue[qi] && queue[qi].id; document.querySelectorAll("#view .row").forEach(r => r.classList.toggle("playing", r.dataset.id === id)); }
 function renderQueue() {
@@ -975,6 +985,7 @@ function wireAudio(a) {
   a.addEventListener("waiting", () => { if (mode === "audio" && a === audio) status("Loading…"); });
   a.addEventListener("canplay", () => { if ($("#npStatus").textContent === "Loading…") status(""); });
   a.addEventListener("ended", () => { if (a === audio) next(true); });
+  a.addEventListener("pause", () => { if (a === audio && typeof savePos === "function") savePos(); }); a.addEventListener("seeked", () => { if (a === audio && typeof savePos === "function") savePos(); });
 }
 wireAudio(audio);
 // quality badge on Now Playing = the quick Wi-Fi / Data saver switch
@@ -1010,7 +1021,7 @@ if ("mediaSession" in navigator) {
   const ms = navigator.mediaSession;
   const h = (a, f) => { try { ms.setActionHandler(a, f); } catch (e) {} };
   h("play", () => P.play()); h("pause", () => P.pause());
-  h("previoustrack", prev); h("nexttrack", () => next(false));
+  h("previoustrack", () => prev()); h("nexttrack", () => next(false));
   h("seekto", d => P.seek(d.seekTime));
   h("seekbackward", null); h("seekforward", null); // keep next/prev buttons on the lock screen
 }
@@ -1415,4 +1426,340 @@ document.addEventListener("click", e => {
   if (a === "savePl") { e.preventDefault(); e.stopPropagation(); const pl = subView && getPlaylist(subView); if (!pl || !pl.tracks.length) return; const np = { id: "p" + Date.now().toString(36), name: pl.name, tracks: pl.tracks.map(slim) }; playlists.unshift(np); store.set("playlists", playlists); toast(`“${pl.name}” Library me add ho gayi ✅`); return; }
   if (a === "back" && (svBackHome && (String(subView || "").startsWith("sv:") || subView === "recap"))) { e.preventDefault(); e.stopPropagation(); svBackHome = false; go("home"); return; }
 }, true);
+
+// ---------- Resume where you left off (app closed / swiped away / reloaded) ----------
+// The resume point is {id, pos} of the song in the player; it is never written before a song is actually loaded,
+// so a fresh start can no longer overwrite it with 0:00.
+function savePos() {
+  try {
+    const t = queue[qi]; if (!t) return;
+    if (mode !== "yt" && (!audio.src || audio.readyState < 1)) return;
+    const cur = P.time(); if (!isFinite(cur)) return;
+    store.set("pos", cur); store.set("posInfo", { id: t.id, pos: Math.round(cur * 10) / 10, at: Date.now() });
+  } catch (e) {}
+}
+function resumeAt() {
+  const t = queue[qi]; if (!t) return 0;
+  const pi = store.get("posInfo", null);
+  if (pi && pi.id === t.id) return Math.max(0, Number(pi.pos) || 0);
+  return pi ? 0 : Math.max(0, Number(store.get("pos", 0)) || 0); // older builds kept only "pos"
+}
+function showResumePoint() { // restored song: show where it will continue from
+  const t = queue[qi]; if (!t || audio.src) return;
+  const p = resumeAt(), d = Number(t.dur) || 0; if (!p) return;
+  const pct = d ? Math.min(100, p / d * 100) : 0;
+  $("#miniProg div").style.width = pct + "%";
+  const s = $("#seek"); s.value = d ? Math.round(p / d * 1000) : 0; s.style.setProperty("--p", pct + "%");
+  $("#tCur").textContent = fmt(p); if (d) $("#tDur").textContent = "-" + fmt(Math.max(0, d - p));
+}
+showResumePoint();
+document.addEventListener("visibilitychange", () => { if (document.hidden) savePos(); });
+window.addEventListener("pagehide", savePos); window.addEventListener("beforeunload", savePos);
+document.addEventListener("pause", savePos); // Android: app sent to background
+
+// ---------- Listen Together (Jam): shared room on the server; every device streams the song itself and follows the room's clock ----------
+const JAM_BASE = IMP_BASE, JAM_SITE = "https://dhun.sites.tab.bot/";
+const JAM_ICON = '<svg viewBox="0 0 24 24"><path d="M12 3a8 8 0 00-8 8v5.5A2.5 2.5 0 006.5 19H8v-7H6v-1a6 6 0 0112 0v1h-2v7h1.5a2.5 2.5 0 002.5-2.5V11a8 8 0 00-8-8z"/><circle cx="12" cy="21" r="1.2"/><circle cx="8.2" cy="21" r="1.2"/><circle cx="15.8" cy="21" r="1.2"/></svg>';
+let jam = null; // {code, rev, st, mem, lastOk}
+let jamMid = store.get("jamMid", ""); if (!/^[\w-]{6,40}$/.test(jamMid)) { jamMid = "m" + Math.random().toString(36).slice(2, 12) + Date.now().toString(36).slice(-4); store.set("jamMid", jamMid); }
+let jamApplying = false, jamPollT = 0, jamHbAt = 0, jamOffs = [], jamOff = 0, jamSeekAt = 0, jamLoadAt = 0, jamBusy = false, jamFill = null, jamFillFor = "", jamPend = 0, jamFail = 0, jamPeek = null;
+const jamOn = () => !!(jam && jam.code);
+const jamNow = () => Date.now() + jamOff;
+const jamName = () => String(store.get("jamName", "") || tgMe.first || (tgMe.name || "").split(" ")[0] || "").slice(0, 24);
+const jamExp = st => !st || !st.song ? 0 : Math.max(0, st.playing ? st.pos + (jamNow() - st.at) / 1000 : st.pos);
+const jamLink = c => JAM_SITE + "?jam=" + c;
+const jamColor = s => { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h},62%,46%)`; };
+const jamAv = (m, big) => `<i class="jamAv${big ? " big" : ""}" style="background:${jamColor(m.m)}">${esc((m.n || "?").trim().charAt(0).toUpperCase() || "?")}</i>`;
+function jamSample(t0, t1, now) { if (!now) return; const rtt = t1 - t0; jamOffs.push({ rtt, off: now - (t0 + t1) / 2 }); if (jamOffs.length > 16) jamOffs.shift(); const best = jamOffs.slice().sort((a, b) => a.rtt - b.rtt)[0]; jamOff = best.off; }
+async function jamReq(path, body) {
+  const t0 = Date.now();
+  const r = await fetch(JAM_BASE + path, body ? { method: "POST", headers: { "content-type": "text/plain;charset=UTF-8" }, body: JSON.stringify(body), cache: "no-store" } : { cache: "no-store" });
+  const t1 = Date.now(); if (!r.ok && r.status !== 409) throw new Error("HTTP " + r.status);
+  const j = await r.json(); jamSample(t0, t1, j.now); return j;
+}
+async function jamClock() { for (let k = 0; k < 4; k++) { try { await jamReq("/api/jam/t?_=" + Math.random()); } catch (e) {} } }
+const jamSlim = t => { const o = slim(t); delete o.tg; if (!o.url) { const u = urlOf(t); if (/^https:/.test(u)) o.url = u; } return o; };
+function jamUnlock() { // inside the tap: lets later play() calls start audio (iOS / Chrome autoplay rules)
+  try { if (audio.paused && mode !== "yt") { const p = audio.play(); if (p) p.catch(() => {}); if (!queue[qi] || !audio.src) audio.pause(); } } catch (e) {}
+}
+// ----- applying the room's state to this device -----
+function jamApply(st, fromServer) {
+  if (!st) return;
+  const prevSt = jam.st; jam.st = st;
+  const want = st.song, cur = queue[qi];
+  if (!want) { renderJamUI(); return; }
+  jamApplying = true;
+  try {
+    if (!cur || cur.id !== want.id) {
+      queue = [want].concat(st.queue || []).map(slim); qi = 0; autoplayAdded = new Set(); saveQ();
+      jamLoadAt = Date.now(); jamSeekAt = Date.now(); if (audio.playbackRate !== 1) audio.playbackRate = 1;
+      loadCurrent(!!st.playing, jamExp(st));
+      if (!st.playing) { userPaused = true; syncPlay(); }
+      jamPrefetchFill();
+    } else {
+      const ids = (st.queue || []).map(x => x.id).join(","), mine = queue.slice(qi + 1).map(x => x.id).join(",");
+      if (qi !== 0 || ids !== mine) { queue = [cur].concat((st.queue || []).map(slim)); qi = 0; saveQ(); renderQueue(); prepNext(); jamPrefetchFill(); }
+      jamCheck(true);
+    }
+  } finally { jamApplying = false; }
+  renderJamUI();
+}
+function jamCheck(force) { // keep this device on the room's clock: play/pause + drift correction
+  if (!jamOn() || !jam.st || !jam.st.song) return;
+  const st = jam.st, cur = queue[qi]; if (!cur || cur.id !== st.song.id) return;
+  const exp = jamExp(st), now = Date.now();
+  jamApplying = true;
+  try {
+    if (!st.playing) {
+      if (P.playing()) rawPause();
+      if (audio.playbackRate !== 1) audio.playbackRate = 1;
+      if (Math.abs(P.time() - exp) > 1 && now - jamSeekAt > 1500 && (mode === "yt" || audio.readyState >= 1)) { jamSeekAt = now; rawSeek(exp); }
+      return;
+    }
+    const d = P.dur(); if (d && exp > d + 1) return; // song over on the room's clock; whoever hits 'ended' first moves the room on
+    if (!P.playing()) { if (!userPaused || force) { rawPlay(); } return; }
+    if (mode === "yt") { const dd = P.time() - exp; if (Math.abs(dd) > 1.5 && now - jamSeekAt > 4000) { jamSeekAt = now; rawSeek(exp); } return; }
+    if (audio.readyState < 3 || now - jamLoadAt < 1200) return; // still buffering
+    const drift = audio.currentTime - exp;
+    if (Math.abs(drift) > 1.5) { if (now - jamSeekAt > 3500) { jamSeekAt = now; audio.playbackRate = 1; rawSeek(exp + 0.25); } return; }
+    // small drift: nudge the speed a little until it is back in step (pitch is preserved)
+    const r = Math.abs(drift) < 0.12 ? 1 : (drift > 0 ? 0.95 : 1.05);
+    if (Math.abs(drift) < 0.35 && audio.playbackRate === 1) return;
+    if (audio.playbackRate !== r) audio.playbackRate = r;
+  } finally { jamApplying = false; }
+}
+setInterval(() => { if (jamOn()) jamCheck(false); }, 700);
+// ----- talking to the room -----
+async function jamAct(a, optimistic) {
+  if (!jamOn()) return;
+  if (optimistic) { try { optimistic(); } catch (e) {} }
+  jamPend++;
+  try {
+    const j = await jamReq("/api/jam/act", { c: jam.code, m: jamMid, n: jamName(), a });
+    if (j.gone) return jamGone();
+    if (j.ok && j.st && j.rev >= (jam.rev || 0)) { jam.rev = j.rev; if (j.mem) jamMembers(j.mem); jamApply(j.st, true); }
+  } catch (e) { toast("Listen Together: connection slow, retry ho raha hai…"); }
+  finally { jamPend--; }
+}
+function jamPredict(mut) { // apply a change on this phone right away; the server's answer confirms it
+  const st = JSON.parse(JSON.stringify(jam.st || {})); mut(st); st.at = jamNow(); jamApply(st, false);
+}
+async function jamPoll() {
+  clearTimeout(jamPollT); if (!jamOn()) return;
+  const code = jam.code;
+  if (!jamBusy && !jamPend) {
+    jamBusy = true;
+    try {
+      const hb = Date.now() - jamHbAt > 8000; if (hb) jamHbAt = Date.now();
+      const j = await jamReq(`/api/jam/get?c=${code}&m=${jamMid}&r=${jam.rev || 0}${hb ? "&hb=1&n=" + encodeURIComponent(jamName()) : ""}&_=${Date.now() % 1e6}`);
+      if (!jamOn() || jam.code !== code) return;
+      jamFail = 0;
+      if (j.gone) return jamGone();
+      if (j.mem) jamMembers(j.mem);
+      if (!j.same && j.st && j.rev > (jam.rev || 0) && !jamPend) { const ev = j.st.ev, by = j.st.by; jam.rev = j.rev; jamToast(ev, by); jamApply(j.st, true); }
+    } catch (e) { jamFail++; if (jamFail === 4) toast("Listen Together: internet slow hai…"); }
+    finally { jamBusy = false; }
+  }
+  jamPollT = setTimeout(jamPoll, document.hidden ? 3000 : 1400);
+}
+function jamToast(ev, by) {
+  if (!ev || !by || by.m === jamMid) return; const n = by.n || "Koi";
+  const T = { song: `${n} ne gaana badla: ${ev.title || ""}`, next: `${n} ne next gaana lagaya`, prev: `${n} ne pichhla gaana lagaya`, pause: `${n} ne pause kiya ⏸`, play: `${n} ne play kiya ▶️`,
+    seek: `${n} ne gaana ${ev.to > ev.from ? "aage" : "peeche"} kiya`, add: `${n} ne queue me add kiya: ${ev.title || ""}`, rm: `${n} ne queue se hataya: ${ev.title || ""}`, top: `${n} ne ${ev.title || "gaana"} next kiya`, shuffle: `${n} ne queue shuffle ki` }[ev.t];
+  if (T) toast(T);
+}
+function jamMembers(mem) {
+  const old = jam.mem || [], had = new Set(old.map(m => m.m)), has = new Set(mem.map(m => m.m));
+  if (jam.memInit) {
+    mem.forEach(m => { if (!had.has(m.m) && m.m !== jamMid) toast(`${m.n} join hue 🎧`); });
+    old.forEach(m => { if (!has.has(m.m) && m.m !== jamMid) toast(`${m.n} chale gaye`); });
+  }
+  jam.memInit = true; const changed = old.map(m => m.m + m.n).join() !== mem.map(m => m.m + m.n).join(); jam.mem = mem; if (changed) renderJamUI();
+}
+function jamGone() { toast("Listen Together session khatam ho gaya"); jamStop(); }
+function jamStop() { clearTimeout(jamPollT); jam = null; store.set("jam", null); if (audio.playbackRate !== 1) audio.playbackRate = 1; renderJamUI(); if (curTab === "library" || curTab === "home") rerender(); }
+async function jamStart() {
+  const nm = jamName(); if (!nm) return toast("Pehle apna naam likho");
+  const cur = queue[qi];
+  const st = cur ? { song: jamSlim(cur), playing: P.playing(), pos: P.time() || 0, queue: queue.slice(qi + 1, qi + 51).map(jamSlim) } : {};
+  jamClock();
+  try {
+    const j = await jamReq("/api/jam/new", { m: jamMid, n: nm, st });
+    if (!j.ok) throw new Error(j.msg || "fail");
+    jam = { code: j.code, rev: j.rev, st: j.st, mem: j.mem, memInit: true }; store.set("jam", { code: j.code });
+    if (cur) { jamApplying = true; try { if (P.playing()) rawSeek(P.time()); } finally { jamApplying = false; } } // keep playing as-is
+    jamApply(j.st, true); jamHbAt = Date.now(); jamPoll(); jamPrefetchFill();
+    jamSheet(); if (curTab === "library" || curTab === "home") rerender();
+    toast("Listen Together shuru 🎧 code: " + j.code);
+  } catch (e) { toast("Session start nahi hua, internet check karo"); }
+}
+async function jamJoin(code, quiet) {
+  code = String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (code.length !== 6) { if (!quiet) jamErr("6 letter ka code daalo"); return; }
+  const nm = jamName(); if (!nm && !quiet) { jamErr("Pehle apna naam likho"); return; }
+  if (jamOn() && jam.code !== code) await jamLeave(true);
+  jamOffs = []; await jamClock();
+  try {
+    const j = await jamReq("/api/jam/join", { c: code, m: jamMid, n: nm || "Dost" });
+    if (!j.ok) { if (quiet) { store.set("jam", null); return; } return jamErr(j.msg || "Join nahi hua"); }
+    jam = { code, rev: j.rev, st: null, mem: j.mem, memInit: true }; store.set("jam", { code });
+    jamApply(j.st, true); jamHbAt = Date.now(); jamPoll();
+    if (!quiet) { closeSheet(); openNP(); const host = (j.st.by && j.st.by.n) || ""; toast(j.st.song ? `Listen Together me aa gaye 🎧 ${j.mem.length} log sun rahe hain` : `Join ho gaye 🎧 ${host ? host + " " : ""}gaana lagayenge to yahan bajega`); }
+    if (curTab === "library" || curTab === "home") rerender();
+  } catch (e) { if (!quiet) jamErr("Internet slow hai, dobara try karo"); }
+}
+async function jamLeave(silent) {
+  if (!jamOn()) return; const code = jam.code;
+  jamStop();
+  try { await jamReq("/api/jam/leave", { c: code, m: jamMid }); } catch (e) {}
+  if (!silent) toast("Listen Together se nikal gaye — gaana aapke phone pe chalta rahega");
+}
+function jamErr(msg) { const e = document.getElementById("jamErr"); if (e) { e.textContent = msg; e.hidden = false; } else toast(msg); }
+// when the room's queue is empty, have the next song ready so 'ended' can switch instantly even with the screen locked
+async function jamPrefetchFill() {
+  const st = jam && jam.st; if (!st || !st.song || (st.queue || []).length || jamFillFor === st.song.id) return;
+  const sid = st.song.id; jamFillFor = sid; jamFill = null;
+  try { const d = await api(radioURL(st.song)); if (jamFillFor === sid) jamFill = (d.items || []).filter(x => x.id !== sid).slice(0, 15).map(jamSlim); } catch (e) { jamFillFor = ""; }
+}
+// ----- the player's controls, routed through the room while a session is on -----
+const rawPlay = P.play, rawPause = P.pause, rawSeek = P.seek;
+P.play = function () {
+  if (!jamOn() || jamApplying) return rawPlay();
+  const st = jam.st;
+  if (!st || !st.song) return rawPlay();
+  if (st.playing) { userPaused = false; rawPlay(); jamSeekAt = 0; setTimeout(() => jamCheck(true), 300); return; } // already playing in the room: just catch up
+  const pos = P.time() || st.pos || 0; rawPlay();
+  jamAct({ t: "play", pos }, () => { st.playing = true; st.pos = pos; st.at = jamNow(); });
+};
+P.pause = function () {
+  if (!jamOn() || jamApplying) return rawPause();
+  const st = jam.st, pos = P.time(); rawPause();
+  if (!st || !st.song) return;
+  jamAct({ t: "pause", pos }, () => { st.playing = false; st.pos = pos; st.at = jamNow(); });
+};
+P.seek = function (s) {
+  if (!jamOn() || jamApplying) return rawSeek(s);
+  const st = jam.st; rawSeek(s); jamSeekAt = Date.now();
+  if (!st || !st.song) return;
+  jamAct({ t: "seek", pos: s }, () => { st.pos = s; st.at = jamNow(); });
+};
+const rawNext = next, rawPrev = prev, rawPlayList = playList, rawAddToQueue = addToQueue, rawStartRadio = startRadio, rawFill = maybeAutoplayFill;
+next = function (auto) {
+  if (!jamOn()) return rawNext(auto);
+  const st = jam.st; if (!st || !st.song) return;
+  const fill = (st.queue || []).length ? null : (jamFill || []);
+  const nx = (st.queue || [])[0] || (fill && fill[0]);
+  if (!nx) { if (auto) { userPaused = true; syncPlay(); } else toast("Queue khali hai — koi gaana chalao"); jamAct(auto ? { t: "ended", id: st.song.id } : { t: "next" }); return; }
+  const a = auto ? { t: "ended", id: st.song.id } : { t: "next" }; if (fill) a.fill = fill;
+  jamPredict(s => { if (s.song) s.hist = (s.hist || []).concat([s.song]).slice(-30); const q = (s.queue && s.queue.length) ? s.queue : (fill || []); s.song = q[0]; s.queue = q.slice(1); s.pos = 0; s.playing = true; s.by = { m: jamMid, n: jamName() }; });
+  jamAct(a);
+};
+prev = function () {
+  if (!jamOn()) return rawPrev();
+  const st = jam.st; if (!st || !st.song) return;
+  if (P.time() > 3 || !(st.hist || []).length) return P.seek(0);
+  jamPredict(s => { const h = s.hist || []; const p = h.pop(); s.hist = h; s.queue = [s.song].concat(s.queue || []); s.song = p; s.pos = 0; s.playing = true; });
+  jamAct({ t: "prev" });
+};
+playList = function (list, i) {
+  if (!jamOn()) return rawPlayList(list, i);
+  i = Math.max(0, Math.min(i, list.length - 1)); const t = list[i]; if (!t) return;
+  const track = jamSlim(t), rest = list.slice(i + 1, i + 51).map(jamSlim);
+  jamPredict(s => { s.queue = (s.queue || []).filter(x => x.id !== track.id); if (!s.queue.length) s.queue = rest.filter(x => x.id !== track.id); if (s.song) s.hist = (s.hist || []).concat([s.song]).slice(-30); s.song = track; s.pos = 0; s.playing = true; });
+  jamAct({ t: "song", track, list: rest });
+};
+addToQueue = function (t, nx) {
+  if (!jamOn()) return rawAddToQueue(t, nx);
+  const track = jamSlim(t);
+  if (!jam.st || !jam.st.song) return playList([t], 0);
+  jamPredict(s => { s.queue = s.queue || []; if (nx) s.queue.unshift(track); else s.queue.push(track); });
+  toast(nx ? "Sabke liye next me laga diya 🎧" : "Sabki queue me add ho gaya 🎧");
+  jamAct({ t: "add", track, next: !!nx });
+};
+startRadio = function (t) {
+  if (!jamOn()) return rawStartRadio(t);
+  toast("Station shuru ho raha hai…");
+  api(radioURL(t)).then(d => { const more = (d.items || []).filter(x => x.id !== t.id); jamPredict(s => { s.queue = []; }); jamAct({ t: "clear" }).then(() => playList([t].concat(more), 0)); }).catch(() => playList([t], 0));
+};
+maybeAutoplayFill = function () { if (jamOn()) return; return rawFill(); };
+// queue panel: rows act on the room's queue
+$("#queueList").addEventListener("click", e => {
+  if (!jamOn() || !jam.st) return;
+  const row = e.target.closest("[data-i]"); if (!row) return;
+  e.stopPropagation(); e.preventDefault();
+  const i = +row.dataset.i - qi - 1, t = (jam.st.queue || [])[i]; if (!t) return;
+  if (e.target.closest("[data-more]")) {
+    return showSheet(`<div class="sgroup"><div class="shead"><div class="t1">${esc(t.title)}</div></div><button data-s="play">Abhi chalao ${ICON.play || ""}</button><button data-s="top">Next me lagao ${ICON.playNext}</button><button data-s="rm" class="danger">Queue se hatao ${ICON.trash}</button></div>`, {
+      play: () => { jamPredict(s => { s.queue.splice(i, 1); if (s.song) s.hist = (s.hist || []).concat([s.song]); s.song = t; s.pos = 0; s.playing = true; }); jamAct({ t: "qplay", i, id: t.id }); },
+      top: () => { jamPredict(s => { s.queue.splice(i, 1); s.queue.unshift(t); }); jamAct({ t: "top", i, id: t.id }); },
+      rm: () => { jamPredict(s => { s.queue.splice(i, 1); }); jamAct({ t: "rm", i, id: t.id }); } });
+  }
+  jamPredict(s => { s.queue.splice(i, 1); if (s.song) s.hist = (s.hist || []).concat([s.song]); s.song = t; s.pos = 0; s.playing = true; });
+  jamAct({ t: "qplay", i, id: t.id });
+}, true);
+$("#npShuffle").addEventListener("click", e => { if (!jamOn()) return; e.stopImmediatePropagation(); jamPredict(s => { const q = s.queue || []; for (let k = q.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [q[k], q[j]] = [q[j], q[k]]; } }); jamAct({ t: "shuffle" }); toast("Sabki queue shuffle ho gayi"); }, true);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && jamOn()) { jamOffs = jamOffs.slice(-4); jamPoll(); setTimeout(() => jamCheck(true), 400); } });
+window.addEventListener("online", () => { if (jamOn()) jamPoll(); });
+// ----- UI -----
+const npJamBtn = document.createElement("button"); npJamBtn.id = "npJam"; npJamBtn.className = "icon small"; npJamBtn.setAttribute("aria-label", "Listen Together"); npJamBtn.innerHTML = JAM_ICON + '<b class="jamBadge"></b>';
+$(".npBottom").insertBefore(npJamBtn, $("#npRepeat")); npJamBtn.onclick = () => jamSheet();
+const npJamBar = document.createElement("button"); npJamBar.id = "npJamBar"; npJamBar.className = "hidden"; $("#npStatus").insertAdjacentElement("afterend", npJamBar); npJamBar.onclick = () => jamSheet();
+function jamAvs(max) { const mem = (jam && jam.mem) || []; return mem.slice(0, max).map(m => jamAv(m)).join("") + (mem.length > max ? `<i class="jamAv more">+${mem.length - max}</i>` : ""); }
+function renderJamUI() {
+  const on = jamOn(), n = on ? (jam.mem || []).length : 0;
+  npJamBtn.classList.toggle("on", on); npJamBtn.querySelector(".jamBadge").textContent = on && n ? n : "";
+  npJamBar.classList.toggle("hidden", !on);
+  if (on) npJamBar.innerHTML = `<span class="jamAvs">${jamAvs(5)}</span><span class="jamBarT">Listen Together · ${n} ${n === 1 ? "person" : "log"}</span><span class="jamCodeS">${esc(jam.code)}</span>`;
+  $("#mini").classList.toggle("jamming", on);
+  const sh = document.getElementById("jamBox"); if (sh && !sheet.classList.contains("hidden") && sh.dataset.on === String(on)) { const ml = document.getElementById("jamMem"); if (ml && on) ml.innerHTML = jamMemHTML(); }
+}
+function jamMemHTML() { return (jam.mem || []).map(m => `<div class="jamMemRow">${jamAv(m, true)}<span>${esc(m.n)}${m.m === jamMid ? ' <small>(aap)</small>' : ""}</span>${jam.st && jam.st.by && jam.st.by.m === m.m && jam.st.ev && jam.st.ev.t !== "start" ? '<small class="jamLast">abhi chalaya</small>' : ""}</div>`).join(""); }
+function jamShareText(c) { return `Mere saath Dhun pe ek saath gaane suno 🎧\nLink kholo: ${jamLink(c)}\nYa code daalo: ${c}`; }
+function jamSheet(joinCode) {
+  if (jamOn() && (!joinCode || joinCode === jam.code)) {
+    const c = jam.code, txt = encodeURIComponent(jamShareText(c));
+    showSheet(`<div class="sgroup jamSheet" id="jamBox" data-on="true"><div class="jamHead"><i class="jamIco">${JAM_ICON}</i><div><b>Listen Together <span class="jamLive">LIVE</span></b><div class="sub">Sab koi gaana badal, pause, aage-peeche kar sakta hai</div></div></div>
+      <div class="jamCodeBox"><small>Session code</small><div class="jamCodeBig">${esc(c)}</div><small>Dost ko ye code ya link bhejo</small></div>
+      <div class="jamShare"><a class="jamWa" href="https://wa.me/?text=${txt}" target="_blank" rel="noopener">WhatsApp</a><a class="jamTg" href="https://t.me/share/url?url=${encodeURIComponent(jamLink(c))}&text=${encodeURIComponent("Mere saath Dhun pe ek saath gaane suno 🎧 Code: " + c)}" target="_blank" rel="noopener">Telegram</a><button data-s="jamCopy">${navigator.share ? "Share…" : "Copy link"}</button></div>
+      <div class="jamMemH">Sun rahe hain</div><div id="jamMem">${jamMemHTML()}</div></div>
+      <div class="sgroup"><button data-s="jamLeave" class="danger">Leave Listen Together</button></div>`, {
+      jamCopy: () => { const l = jamLink(c); if (navigator.share) { navigator.share({ title: "Dhun · Listen Together", text: jamShareText(c).split("\n")[0] + " Code: " + c, url: l }).catch(() => {}); return true; } (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(() => toast("Link copy ho gaya ✅")).catch(() => toast(l)); return true; },
+      jamLeave: () => { jamLeave(false); },
+    });
+    return;
+  }
+  const nm = jamName(), code = joinCode || "";
+  const peek = joinCode && jamPeek && jamPeek.code === joinCode ? jamPeek : null;
+  const inv = joinCode ? `<div class="jamInv">${peek && peek.mem && peek.mem.length ? `<span class="jamAvs">${peek.mem.slice(0, 5).map(m => jamAv(m)).join("")}</span> <b>${esc(peek.mem[0].n)}</b>${peek.mem.length > 1 ? ` + ${peek.mem.length - 1}` : ""} aapko bula rahe hain` : "Aapko Listen Together me bulaya gaya hai"}${peek && peek.st && peek.st.song ? `<div class="jamNow">${peek.st.song.thumb ? `<img src="${esc(peek.st.song.thumb)}" alt="">` : ""}<span><b>${esc(peek.st.song.title)}</b><small>${esc(peek.st.song.artist)}</small></span></div>` : ""}</div>` : "";
+  showSheet(`<div class="sgroup jamSheet" id="jamBox" data-on="false"><div class="jamHead"><i class="jamIco">${JAM_ICON}</i><div><b>Listen Together</b><div class="sub">Dosto ke saath ek hi gaana, ek hi time pe — kahin bhi ho, koi bhi phone ho. Sab gaana badal / pause kar sakte hain.</div></div></div>
+    <div class="jamBody">${inv}<label for="jamNameIn">Aapka naam</label><input id="jamNameIn" maxlength="24" placeholder="Naam likho" value="${esc(nm)}" autocomplete="off">
+    ${joinCode ? `<button class="jamPri" data-s="jamJoinGo">Join karo 🎧</button>` : `<button class="jamPri" data-s="jamStartGo">Start Listen Together</button><div class="jamOr"><span>ya code se join karo</span></div><div class="jamJoinRow"><input id="jamCodeIn" maxlength="6" placeholder="CODE" value="${esc(code)}" autocapitalize="characters" autocomplete="off" spellcheck="false"><button class="jamSec" data-s="jamJoinGo">Join</button></div>`}
+    <div class="impErr" id="jamErr" hidden></div></div></div>`, {
+    jamStartGo: () => { if (!jamSaveName()) return true; jamUnlock(); jamStart(); return true; },
+    jamJoinGo: () => { if (!jamSaveName()) return true; const c = joinCode || (($("#jamCodeIn") || {}).value || ""); jamUnlock(); jamJoin(c); return true; },
+  });
+}
+function jamSaveName() { const i = $("#jamNameIn"); const v = String(i ? i.value : "").replace(/[<>]/g, "").trim().slice(0, 24); if (!v) { jamErr("Pehle apna naam likho"); if (i) i.focus(); return false; } store.set("jamName", v); return true; }
+document.addEventListener("click", e => { const b = e.target.closest("[data-act=jam]"); if (b) { e.preventDefault(); e.stopPropagation(); jamSheet(); } }, true);
+function jamRowHTML() { const on = jamOn(); return `<button data-act="jam" class="jamRow${on ? " on" : ""}"><i class="jamRowI">${JAM_ICON}</i><span>Listen Together <small class="sub">${on ? `Live · ${esc(jam.code)} · ${(jam.mem || []).length} log` : "Dosto ke saath ek saath suno"}</small></span>${on ? `<span class="jamAvs">${jamAvs(3)}</span>` : ""}</button>`; }
+const rawRenderLibrary = renderLibrary;
+renderLibrary = function () { rawRenderLibrary(); if (subView) return; const ll = view.querySelector(".libLinks"); if (ll) { const imp = ll.querySelector("[data-act=importPl]"); const tmp = document.createElement("div"); tmp.innerHTML = jamRowHTML(); const el = tmp.firstElementChild; if (imp) ll.insertBefore(el, imp); else ll.appendChild(el); } };
+const rawRenderHome = renderHome;
+renderHome = function () { rawRenderHome(); if (!jamOn()) return; const tmp = document.createElement("div"); tmp.innerHTML = `<button data-act="jam" class="jamHome"><span class="jamAvs">${jamAvs(4)}</span><span><b>Listen Together live 🎧</b><small>${(jam.mem || []).length} log · code ${esc(jam.code)}</small></span></button>`; const h1 = view.querySelector("h1"); if (h1) h1.insertAdjacentElement("afterend", tmp.firstElementChild); };
+// join from a link (?jam=CODE), or rejoin the session this phone was in
+(async () => {
+  let c = ""; try { c = (new URLSearchParams(location.search).get("jam") || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); } catch (e) {}
+  if (c) { try { history.replaceState(null, "", location.pathname); } catch (e) {} }
+  const saved = store.get("jam", null);
+  if (c && c.length === 6) {
+    if (saved && saved.code === c) return jamJoin(c, true);
+    try { const j = await jamReq(`/api/jam/get?c=${c}`); if (j.gone) { toast("Ye Listen Together session khatam ho gaya"); return; } jamPeek = { code: c, mem: j.mem, st: j.st }; } catch (e) {}
+    jamSheet(c); return;
+  }
+  if (saved && saved.code) jamJoin(saved.code, true);
+})();
+window.__jam = { get jam() { return jam; }, get off() { return jamOff; }, exp: () => jam && jamExp(jam.st), check: jamCheck };
+
+// storage: an update APK left in the app cache after installing is removed (it is ~5 MB and never needed again)
+if (NATIVE && FS) setTimeout(() => { try { if (!updState) FS.deleteFile({ path: "dhun-update.apk", directory: "CACHE" }).catch(() => {}); } catch (e) {} }, 20000);
 })();
