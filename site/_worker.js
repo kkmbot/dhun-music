@@ -720,6 +720,48 @@ async function tgRoute(p, req, env, u, ctx) {
   return J({ error: "not found" }, 404);
 }
 
+// ---- Deals: latest posts of a public Telegram channel (t.me/s web preview), cached ~20 min, fail soft ----
+const DEALS_DEFAULT = "bestdeal_shoppingonline";
+const dealsChannel = env => (String((env && env.DEALS_CHANNEL) || DEALS_DEFAULT).replace(/^@/, "").replace(/[^A-Za-z0-9_]/g, "").slice(0, 64)) || DEALS_DEFAULT;
+const dUnesc = s => String(s || "").replace(/&nbsp;/g, " ").replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#(\d+);/g, (m, n) => { try { return String.fromCodePoint(+n); } catch (e) { return ""; } }).replace(/&#x([0-9a-f]+);/gi, (m, n) => { try { return String.fromCodePoint(parseInt(n, 16)); } catch (e) { return ""; } }).replace(/&amp;/g, "&");
+const dealCut = (s, n) => { const a = Array.from(s); return a.length <= n ? s : a.slice(0, n - 1).join("").replace(/[\s·|,:-]+\S*$/u, "").trim() + "…"; };
+function parseDeals(html, ch) {
+  const out = [];
+  for (const m of String(html).split('class="tgme_widget_message_wrap').slice(1)) {
+    const pm = m.match(/data-post="[A-Za-z0-9_]+\/(\d+)"/); if (!pm) continue;
+    const postUrl = `https://t.me/${ch}/${pm[1]}`;
+    const tm = m.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/); if (!tm) continue;
+    const th = tm[1];
+    const links = [...new Set([...th.matchAll(/<a\s[^>]*?href="([^"]+)"/g)].map(x => dUnesc(x[1]).trim()))].filter(h => /^https:\/\/[^\s"'<>]+$/.test(h) && !/^https:\/\/(t\.me|telegram\.me|telegram\.org)\//i.test(h)).slice(0, 8);
+    const raw = dUnesc(th.replace(/<br\s*\/?>/gi, "\n").replace(/<i class="emoji"[^>]*>\s*<b>([^<]*)<\/b>\s*<\/i>/g, "$1").replace(/<[^>]+>/g, ""));
+    const lines = raw.split("\n").map(l => l.replace(/https?:\/\/\S+/g, "").replace(/(^|\s)#\w+/g, " ").replace(/prices?\s*\/\s*stock may change/ig, "").replace(/\b(link|buy now|shop now|grab now|order now|click here)\s*[:\-]?\s*$/i, "").replace(/\s+/g, " ").replace(/^[\s|:•·\-–🔗👉➡]+|[\s|:•·\-–🔗👉➡]+$/gu, "").trim()).filter(l => Array.from(l).length > 2 && !/commission|maximi[sz]e earnings|affiliate/i.test(l));
+    if (!lines.length) continue;
+    const text = dealCut(lines.join(" · "), 90);
+    const im = m.match(/tgme_widget_message_(?:photo_wrap|video_thumb|link_preview_image)[^>]*?background-image:url\('([^']+)'\)/);
+    let img = im ? dUnesc(im[1]) : ""; if (img.startsWith("//")) img = "https:" + img;
+    if (!/^https:\/\/[a-z0-9.-]*(telesco\.pe|telegram\.org|telegram-cdn\.org)\/[^\s"'<>()]+$/i.test(img)) img = "";
+    out.push({ text, url: links.length === 1 ? links[0] : postUrl, postUrl, img: img || undefined, links: links.length });
+  }
+  return out.reverse().slice(0, 10); // newest first
+}
+async function getDeals(env, ctx) {
+  const ch = dealsChannel(env), key = "deals:" + ch;
+  const hit = memGet(key); if (hit) return hit;
+  const ck = new Request("https://dhun.sites.tab.bot/__cache/deals/" + ch);
+  try { const c = await caches.default.match(ck); if (c) { const j = await c.json(); if (j && Array.isArray(j.items) && j.items.length) { memSet(key, j, 300); return j; } } } catch (e) {}
+  let items = [], err = "";
+  try { const r = await tfetch(`https://t.me/s/${ch}`, { headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36", "accept-language": "en" } }, 8000); if (r.ok) items = parseDeals(await r.text(), ch); else err = "http " + r.status; } catch (e) { err = String((e && e.message) || e); }
+  if (!items.length) { const last = memGet("dealsLast:" + ch); if (last) { memSet(key, last, 120); return last; } }
+  const out = { channel: ch, join: `https://t.me/${ch}`, items, at: Date.now(), ...(items.length ? {} : { note: err || "no public posts" }) };
+  memSet(key, out, items.length ? 1200 : 120);
+  if (items.length) {
+    memSet("dealsLast:" + ch, out, 86400);
+    try { const p = caches.default.put(ck, new Response(JSON.stringify(out), { headers: { "content-type": "application/json", "cache-control": "public, max-age=1200" } })); if (ctx && ctx.waitUntil) ctx.waitUntil(p.catch(() => {})); } catch (e) {}
+  }
+  return out;
+}
+
+
 export default {
   async fetch(req, env, ctx) {
     loadConfig(env, req);
@@ -728,8 +770,9 @@ export default {
       if (p.startsWith("/api/tg/") || p.startsWith("/api/u/")) return await tgRoute(p, req, env, u, ctx);
       if (p === "/api/app-version") { // Android in-app updater; values live in /app-version.json (edit that file + swap /dhun.apk to ship a new version)
         let v = {}; try { const r = await env.ASSETS.fetch(new Request(new URL("/app-version.json", u), { headers: { "cache-control": "no-cache" } })); v = await r.json(); } catch (e) {}
-        return new Response(JSON.stringify({ versionCode: Number(v.versionCode) || 0, versionName: String(v.versionName || ""), apkUrl: String(v.apkUrl || SITE + "dhun.apk"), notes: String(v.notes || ""), force: !!v.force, sha256: v.sha256 || "", bytes: v.bytes || 0 }), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache, no-store, must-revalidate", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS" } });
+        return new Response(JSON.stringify({ versionCode: Number(v.versionCode) || 0, versionName: String(v.versionName || ""), apkUrl: String(v.apkUrl || SITE + "dhun.apk"), notes: String(v.notes || ""), force: !!v.force, sha256: v.sha256 || "", bytes: Number(v.bytes || v.size) || 0, ...(Number(v.size) > 0 ? { size: Number(v.size) } : {}) }), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache, no-store, must-revalidate", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS" } });
       }
+      if (p === "/api/deals") { let o; try { o = await getDeals(env, ctx); } catch (e) { o = { channel: dealsChannel(env), join: "https://t.me/" + dealsChannel(env), items: [] }; } return J(o, 200, 300); }
       if (p === "/dhun.apk") { const r = await env.ASSETS.fetch(new Request(new URL("/files/dhun-app.apk", u), req)); const h = new Headers(r.headers); h.set("content-type", "application/vnd.android.package-archive"); h.set("content-disposition", 'attachment; filename="Dhun.apk"'); h.set("cache-control", "no-cache"); h.set("access-control-allow-origin", "*"); return new Response(r.body, { status: r.status, headers: h }); }
       if (p === "/api/search") {
         if (!q) return J({ items: [] });

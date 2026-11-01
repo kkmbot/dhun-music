@@ -15,6 +15,7 @@ Dhun is a free music player that runs in the browser and installs on a phone's h
 - **Per-user accounts**: after "Connect Telegram", each user's likes, playlists and history are saved on the server under their own Telegram account and come back on any device. Every request is checked with that user's random session token.
 - **Admin bot panel**: the admin types `/admin` in the bot to get buttons for Stats, Users, Top songs, Broadcast (with preview, dry run and confirm), Refresh, Help and 🧪 Test log. Text commands `/stats`, `/users`, `/broadcast`, `/testlog`, `/help` also work. Only the `ADMIN_ID` can use them.
 - **Logs channel (optional)**: set `LOG_CHANNEL_ID` and the bot posts a short "👤 New user" line there the first time someone starts the bot or connects Telegram from the app (name, @username, user id, time IST, and how they came in). Only new users are logged. Logging is fire-and-forget (never slows down or breaks the user's action) and capped at 20 lines/min with a "+N more" rollup. `/stats` shows whether the logs channel is reachable.
+- **Deals (optional)**: the server reads the latest posts of a public Telegram channel (`DEALS_CHANNEL`, default `bestdeal_shoppingonline`) from its public web preview `t.me/s/<channel>`, caches them ~20 min and serves them at `GET /api/deals` → `{ channel, join, items: [{ text, url, postUrl, img?, links }] }` (max 10, newest first, empty list if the channel can't be read). The app shows a small dismissible "🔥 Deals" card on Listen Now and a one-line ticker above the mini-player that rotates every 6 s (✕ hides both for 24 h), plus a permanent "Join Deals channel 🛍️" card (latest 3 deals) in Library and a row in Settings. Nothing blocks the screen or plays sound.
 
 ## Folder layout
 
@@ -51,6 +52,7 @@ No secrets are stored in this repo. The server reads them from environment varia
 | `PUBLIC_URL` | public https address of the server, with trailing slash |
 | `LOG_CHANNEL_ID` | optional: id of a Telegram channel/group for new-user logs, e.g. `-1001234567890` (bot must be admin with permission to post). Leave empty to turn logging off |
 | `SUPPORT_TG` | optional: Telegram handle (without `@`) shown as "💬 Support" in the bot's welcome / connected messages. Default `Memer_guru` |
+| `DEALS_CHANNEL` | optional: public Telegram channel username (without `@`) whose latest posts are shown as deals in the app. Default `bestdeal_shoppingonline` |
 
 The server also needs a SQLite-style database bound as `DB` (Cloudflare D1) and the static files bound as `ASSETS`.
 
@@ -58,7 +60,7 @@ The server also needs a SQLite-style database bound as `DB` (Cloudflare D1) and 
 
 The Dhun brand kit is used everywhere: browser favicon, iPhone/Android home-screen icons (including maskable icons for Android), black theme and splash colour (`#000000`), a short logo splash when the app opens, the logo in the app header, Settings footer and Connect Telegram sheet, and `og-image.png` for link previews.
 
-When you change icons, bump the cache version in `site/sw.js` (`const C = "dhun-v8"`) and the `?v=` numbers in `index.html`, so phones fetch the new files.
+When you change icons, bump the cache version in `site/sw.js` (`const C = "dhun-v10"`) and the `?v=` numbers in `index.html`, so phones fetch the new files.
 
 **iPhone note:** iOS saves the home-screen icon when the web app is added. After an icon change, the iPhone home-screen icon updates only after you **remove the web app from the home screen and add it again** (Safari → Share → Add to Home Screen). The app itself updates on its own.
 

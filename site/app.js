@@ -55,6 +55,10 @@ const small = u => u ? u.replace(/=w544-h544/, "=w226-h226") : u;
 const ytThumb = id => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
 let toastT;
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200); }
+// ---- Deals (her Telegram deals channel) — small, dismissible, never blocking ----
+const DEALS_JOIN_DEFAULT = "https://t.me/bestdeal_shoppingonline";
+let deals = (() => { const c = store.get("dealsCache", null); return c && Array.isArray(c.items) ? c : { items: [], join: DEALS_JOIN_DEFAULT, at: 0 }; })();
+let dealIdx = 0, dealTimer = 0, dealLoading = false;
 async function api(path) { const r = await fetch(path); if (!r.ok) throw new Error(r.status); return r.json(); }
 const trackMap = new Map(); // id -> track, for click handlers
 function reg(list) { list.forEach(t => trackMap.set(t.id, t)); return list; }
@@ -94,7 +98,7 @@ function installCard() {
   return `<div class="install"><button data-act="hideInstall">×</button><b>Make it an app:</b> ${ios ? "tap the Share button <b>⎋</b> in Safari, then <b>Add to Home Screen</b>." : "open your browser menu and choose <b>Add to Home Screen</b> / <b>Install app</b>."} It opens full-screen, no ads, keeps playing when you lock your phone.</div>`;
 }
 function renderHome() {
-  let h = `<div class="brandBar"><img src="/logo-h.webp?v=9" alt="Dhun" width="104" height="48"></div><h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}`;
+  let h = `<div class="brandBar"><img src="/logo-h.webp?v=10" alt="Dhun" width="104" height="48"></div><h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}${dealsHomeHTML()}`;
   if (!navigator.onLine) h += `<div class="install offline"><b>You're offline.</b> Dhun needs internet to play. Your downloaded songs are safe in Telegram.</div>`;
   if (recent.length) { bindList("recent", recent.slice(0, 20)); h += `<h2>Recently Played</h2><div class="car">${recent.slice(0, 20).map((t, i) => tileHTML(t, i, "recent")).join("")}</div>`; }
   if (homeData) {
@@ -166,7 +170,7 @@ function renderLibrary() {
   if (playlists.length) {
     h += `<h2>Playlists</h2><div class="grid">${playlists.map(pl => `<button class="tile" data-open="${esc(pl.id)}">${plArtHTML(pl)}<div class="t1">${esc(pl.name)}</div><div class="t2">${pl.tracks.length} song${pl.tracks.length === 1 ? "" : "s"}</div></button>`).join("")}</div>`;
   } else h += `<div class="empty">Make a playlist and add songs from any “···” menu.</div>`;
-  h += footHTML();
+  h += dealsJoinHTML() + footHTML();
   view.innerHTML = h;
 }
 function dlTracks() { return Object.values(dlIdx).sort((a, b) => b.at - a.at).map(x => x.t); }
@@ -197,7 +201,7 @@ function dlInfoHTML() {
 }
 function segHTML(k, opts) { return `<div class="seg">${opts.map(v => `<button data-act="q" data-k="${k}" data-v="${v}" class="${cfg[k] === v ? "on" : ""}">${QNAME[v]}<small>${v}</small></button>`).join("")}</div>`; }
 function footHTML() {
-  return `<div class="dhunFoot"><img src="/dhun-mark.webp?v=9" alt="Dhun" width="30" height="30"><div class="f1">Support &amp; Love 💖</div><div class="sig">Mavi</div><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>Contact us</span></a></div>`;
+  return `<div class="dhunFoot"><img src="/dhun-mark.webp?v=10" alt="Dhun" width="30" height="30"><div class="f0">Created with</div><div class="f1">Support &amp; Love</div><div class="sig">Mavi 💖</div><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>Contact us</span></a></div>`;
 }
 function renderSettings() {
   const auto = autoNet(), c = conn(), cell = netKind() === "cell";
@@ -224,7 +228,7 @@ function renderSettings() {
     <div class="bands${eqOn ? "" : " off"}">${EQF.map((f, i) => `<div class="band"><span>${f >= 1000 ? f / 1000 + "k" : f}</span><input type="range" min="-12" max="12" step="1" value="${eqGains[i]}" data-band="${i}"><b id="bv${i}">${eqGains[i] > 0 ? "+" : ""}${eqGains[i]}</b></div>`).join("")}</div>
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
-  <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button></div>
+  <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button><a class="dealRow" href="${esc(deals.join || DEALS_JOIN_DEFAULT)}" target="_blank" rel="noopener"><i class="dealEmoji">🛍️</i><span>Join Deals channel <small class="sub">Daily deals</small></span></a></div>
   ${footHTML()}`;
   requestAnimationFrame(drawEq);
 }
@@ -371,7 +375,7 @@ async function tgConnectSheet(why) {
   if (!tgCode) { try { const r = await post("/api/tg/new"); if (!r.code) throw 0; tgCode = r.code; tgBot = r.bot || tgBot; store.set("tgBot", tgBot); store.set("tgCode", tgCode); syncInit = false; store.set("syncInit", false); } catch (e) { return toast("Couldn't reach the server, try again"); } }
   const link = `https://t.me/${tgBot}?start=${tgCode}`;
   await new Promise(r => setTimeout(r, 60));
-  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=9" alt="Dhun"><span class="x">⇄</span><div class="tgLogo">${TGICON}</div></div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
+  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=10" alt="Dhun"><span class="x">⇄</span><div class="tgLogo">${TGICON}</div></div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
     <div class="tgSteps">1. Tap <b>Open Telegram</b><br>2. Tap <b>Start</b> in the bot chat<br>3. Come back here — your library syncs and downloads start on their own</div>
     <a class="tgBtn" href="${esc(link)}" target="_blank" rel="noopener">${TGICON}Open Telegram</a>
     <button data-s="check">I've tapped Start ✓</button></div>`, { check: async () => { const ok = await tgRefresh(); if (ok) tgLinked(); else setTimeout(() => tgConnectSheet("Not connected yet — open Telegram and tap Start"), 60); } });
@@ -498,11 +502,11 @@ function tgNames(m) { m = m || {}; const first = realName(m.first) || realName(S
 function acctHTML(compact) {
   if (!tgMe.linked) return compact
     ? `<div class="acct off"><div class="acctTxt"><b>Sign in with Telegram</b><small>Save your likes & playlists to your own account, get them back on any phone</small></div><button data-act="acctConnect" class="tgB">${TGICON}Connect</button></div>`
-    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=9" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
+    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=10" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
   const nm = tgNames(tgMe), who = esc(nm.first), handle = tgMe.username ? "@" + esc(tgMe.username) : (tgMe.uid ? "ID " + esc(tgMe.uid) : "");
   const st = syncBusy ? "Syncing…" : Object.keys(syncDirty).length ? (syncErr === "offline" ? "Offline, will sync later" : "Saving…") : syncAt ? `Synced ${ago(syncAt)}` : "Syncing…";
   if (compact) return `<button class="acct on" data-act="settings"><div class="acctTxt"><b>☁️ ${who}${handle ? ` <span class="acctAt">${handle}</span>` : ""}</b><small>${st} · ${liked.length} liked · ${playlists.length} playlist${playlists.length === 1 ? "" : "s"}</small></div></button>`;
-  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=9" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>${who}</b><small>${handle ? handle + " · " : ""}Signed in with Telegram ✅</small></div></div>
+  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=10" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>${who}</b><small>${handle ? handle + " · " : ""}Signed in with Telegram ✅</small></div></div>
     <div class="setNote">☁️ ${st}<br>Your likes (${liked.length}), playlists (${playlists.length}), recently played and Telegram downloads (${Object.keys(dlIdx).length}) are saved to your account. Connect Telegram on any other phone to get them back.</div>
     <div class="btnRow" style="padding:10px 0 2px;margin:0"><button data-act="syncNow">Sync now</button><button data-act="tgOff" style="color:#ff453a">Log out</button></div></div>`;
 }
@@ -838,4 +842,58 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").cat
 window.__m = { P, queue: () => queue, get audio() { return audio; }, doSearch, playList, lists, get mode() { return mode; }, cfg, setSaver, setEq, setPreset, download, dl: () => dlIdx, dlJobs, removeDl,
   eq() { const o = { on: eqOn, routed: eqRouted, ctx: actx && actx.state, gains: eqNodes.map(n => +n.gain.value.toFixed(2)), types: eqNodes.map(n => n.type), pre: preGain && +preGain.gain.value.toFixed(3) }; if (analyser) { const d = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(d); let sq = 0; for (const x of d) sq += x * x; o.rms = +Math.sqrt(sq / d.length).toFixed(4); } return o; } };
 rerender(); syncPlay();
+// ---- Deals UI ----
+function dealsHidden() { return (store.get("dealsHideUntil", 0) || 0) > Date.now(); }
+function dealHref(d) { const u = String((d && d.url) || ""); return /^https:\/\//.test(u) ? u : (deals.join || DEALS_JOIN_DEFAULT); }
+function dealImg(d, cls) { return d && d.img && /^https:\/\//.test(d.img) ? `<img class="${cls}" src="${esc(d.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('i'),{className:'${cls} ph',textContent:'🛍️'}))">` : `<i class="${cls} ph">🛍️</i>`; }
+function dealCur() { const it = deals.items || []; return it.length ? it[dealIdx % it.length] : null; }
+function dealsHomeHTML() {
+  if (dealsHidden() || !(deals.items || []).length) return "";
+  const d = dealCur();
+  return `<div id="dealCard" class="dealCard"><a class="dcLink" href="${esc(dealHref(d))}" target="_blank" rel="noopener">${dealImg(d, "dcImg")}<span class="dcBody"><b>🔥 Deals</b><span class="dcT">${esc(d.text)}</span></span></a><button class="dcX" data-deals-x aria-label="Hide deals">✕</button></div>`;
+}
+function dealsJoinHTML() {
+  const join = deals.join || DEALS_JOIN_DEFAULT, top = (deals.items || []).slice(0, 3);
+  return `<div class="dealsJoin"><div class="djHead"><i class="djIcon">🛍️</i><span><b>Deals channel</b><small>Best shopping deals, daily · on Telegram</small></span></div>${top.length ? `<div class="djList">${top.map(d => `<a href="${esc(dealHref(d))}" target="_blank" rel="noopener">${dealImg(d, "djImg")}<span>${esc(d.text)}</span></a>`).join("")}</div>` : ""}<a class="djBtn" href="${esc(join)}" target="_blank" rel="noopener">${TGICON}<span>Join Deals channel 🛍️</span></a></div>`;
+}
+function dealsTick() {
+  const el = document.getElementById("dealTick"); if (!el) return;
+  const d = dealCur(), show = !!d && !dealsHidden();
+  el.classList.toggle("hidden", !show); document.body.classList.toggle("hasTick", show);
+  if (!show) return;
+  const a = el.querySelector("a"); a.href = dealHref(d); el.querySelector(".dtT").textContent = d.text;
+}
+function dealsRotate() {
+  if (document.hidden || dealsHidden() || (deals.items || []).length < 2) return;
+  dealIdx = (dealIdx + 1) % deals.items.length;
+  const d = dealCur(), card = document.getElementById("dealCard"), tick = document.getElementById("dealTick");
+  [card, tick].forEach(x => x && x.classList.add("fade"));
+  setTimeout(() => {
+    if (card && card.isConnected) { const l = card.querySelector(".dcLink"); l.href = dealHref(d); const old = l.querySelector(".dcImg"); if (old) old.outerHTML = dealImg(d, "dcImg"); card.querySelector(".dcT").textContent = d.text; card.classList.remove("fade"); }
+    dealsTick(); if (tick) tick.classList.remove("fade");
+  }, 220);
+}
+function dealsHide() {
+  store.set("dealsHideUntil", Date.now() + 24 * 3600e3);
+  const c = document.getElementById("dealCard"); if (c) c.remove();
+  dealsTick();
+}
+function dealsLoad() {
+  if (dealLoading || Date.now() - (deals.at || 0) < 20 * 60e3) return;
+  dealLoading = true;
+  api("/api/deals").then(j => {
+    if (!j || !Array.isArray(j.items)) return;
+    const had = (deals.items || []).length;
+    deals = { items: j.items.filter(d => d && d.text).slice(0, 10), join: /^https:\/\/t\.me\/\w+$/.test(j.join || "") ? j.join : DEALS_JOIN_DEFAULT, at: Date.now() };
+    store.set("dealsCache", deals);
+    if (dealIdx >= deals.items.length) dealIdx = 0;
+    dealsTick();
+    if (!had && deals.items.length && ((curTab === "library" && !subView) || (curTab === "home" && performance.now() < 3000 && !document.getElementById("dealCard") && view.scrollTop < 40))) rerender(); // first-ever load only; later visits render from cache with no jump
+  }).catch(() => {}).finally(() => dealLoading = false);
+}
+document.addEventListener("click", e => { const x = e.target.closest("[data-deals-x]"); if (x) { e.preventDefault(); e.stopPropagation(); dealsHide(); } }, true);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) dealsLoad(); });
+dealsTick(); dealsLoad();
+dealTimer = setInterval(dealsRotate, 6000);
+setInterval(dealsLoad, 5 * 60e3);
 })();
