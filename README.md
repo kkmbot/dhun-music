@@ -24,8 +24,12 @@ site/
   app.js                 the whole front-end (player, screens, settings, sync)
   app.css                styles
   sw.js                  service worker (lets the app open offline)
-  manifest.webmanifest   home-screen app name and icons
-  icon-192.png, icon-512.png, apple-touch-icon.png
+  manifest.webmanifest   home-screen app name, colours (#000000) and icons (manifest.json is the same file)
+  favicon.ico, favicon-16/32/48/64.png     browser tab icons
+  apple-touch-icon.png, icon-120/152.png   iPhone home-screen icons
+  icon-192/384/512.png, icon-maskable-192/512.png   Android / PWA icons
+  og-image.png           link preview image (WhatsApp, Telegram, X…)
+  logo-h.webp, dhun-mark.webp   Dhun logo used inside the app (header, splash, Connect Telegram)
   _worker.js             the server: JioSaavn/YouTube search, Telegram bot + webhook, user accounts, admin panel
   .assetsignore          keeps _worker.js from being served as a public file
 schema.sql               database tables (the server also creates them on its own)
@@ -48,6 +52,16 @@ No secrets are stored in this repo. The server reads them from environment varia
 | `LOG_CHANNEL_ID` | optional: id of a Telegram channel/group for new-user logs, e.g. `-1001234567890` (bot must be admin with permission to post). Leave empty to turn logging off |
 
 The server also needs a SQLite-style database bound as `DB` (Cloudflare D1) and the static files bound as `ASSETS`.
+
+## Logo & icons
+
+The Dhun brand kit is used everywhere: browser favicon, iPhone/Android home-screen icons (including maskable icons for Android), black theme and splash colour (`#000000`), a short logo splash when the app opens, the logo in the app header, Settings footer and Connect Telegram sheet, and `og-image.png` for link previews.
+
+When you change icons, bump the cache version in `site/sw.js` (`const C = "dhun-v8"`) and the `?v=` numbers in `index.html`, so phones fetch the new files.
+
+**iPhone note:** iOS saves the home-screen icon when the web app is added. After an icon change, the iPhone home-screen icon updates only after you **remove the web app from the home screen and add it again** (Safari → Share → Add to Home Screen). The app itself updates on its own.
+
+Hinglish: iPhone pe naya icon dekhne ke liye home screen se Dhun hata do, phir Safari me khol ke dobara "Add to Home Screen" karo.
 
 ## Deploying (honest notes)
 

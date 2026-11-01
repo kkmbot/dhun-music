@@ -94,7 +94,7 @@ function installCard() {
   return `<div class="install"><button data-act="hideInstall">×</button><b>Make it an app:</b> ${ios ? "tap the Share button <b>⎋</b> in Safari, then <b>Add to Home Screen</b>." : "open your browser menu and choose <b>Add to Home Screen</b> / <b>Install app</b>."} It opens full-screen, no ads, keeps playing when you lock your phone.</div>`;
 }
 function renderHome() {
-  let h = `<h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}`;
+  let h = `<div class="brandBar"><img src="/logo-h.webp?v=8" alt="Dhun" width="104" height="48"></div><h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}`;
   if (!navigator.onLine) h += `<div class="install offline"><b>You're offline.</b> Dhun needs internet to play. Your downloaded songs are safe in Telegram.</div>`;
   if (recent.length) { bindList("recent", recent.slice(0, 20)); h += `<h2>Recently Played</h2><div class="car">${recent.slice(0, 20).map((t, i) => tileHTML(t, i, "recent")).join("")}</div>`; }
   if (homeData) {
@@ -221,7 +221,7 @@ function renderSettings() {
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button></div>
-  <div class="setNote" style="margin:14px 20px 30px;text-align:center">Dhun · free, no ads</div>`;
+  <div class="brandFoot"><img src="/dhun-mark.webp?v=8" alt="Dhun"><span>Dhun · free, no ads</span></div>`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -367,7 +367,7 @@ async function tgConnectSheet(why) {
   if (!tgCode) { try { const r = await post("/api/tg/new"); if (!r.code) throw 0; tgCode = r.code; tgBot = r.bot || tgBot; store.set("tgBot", tgBot); store.set("tgCode", tgCode); syncInit = false; store.set("syncInit", false); } catch (e) { return toast("Couldn't reach the server, try again"); } }
   const link = `https://t.me/${tgBot}?start=${tgCode}`;
   await new Promise(r => setTimeout(r, 60));
-  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgLogo">${TGICON}</div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
+  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=8" alt="Dhun"><span class="x">⇄</span><div class="tgLogo">${TGICON}</div></div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
     <div class="tgSteps">1. Tap <b>Open Telegram</b><br>2. Tap <b>Start</b> in the bot chat<br>3. Come back here — your library syncs and downloads start on their own</div>
     <a class="tgBtn" href="${esc(link)}" target="_blank" rel="noopener">${TGICON}Open Telegram</a>
     <button data-s="check">I've tapped Start ✓</button></div>`, { check: async () => { const ok = await tgRefresh(); if (ok) tgLinked(); else setTimeout(() => tgConnectSheet("Not connected yet — open Telegram and tap Start"), 60); } });
@@ -491,11 +491,11 @@ const ago = ms => { const s = (Date.now() - ms) / 1000; return s < 60 ? "just no
 function acctHTML(compact) {
   if (!tgMe.linked) return compact
     ? `<div class="acct off"><div class="acctTxt"><b>Sign in with Telegram</b><small>Save your likes & playlists to your own account, get them back on any phone</small></div><button data-act="acctConnect" class="tgB">${TGICON}Connect</button></div>`
-    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgLogo">${TGICON}</div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
+    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=8" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
   const who = tgMe.username ? "@" + esc(tgMe.username) : esc(tgMe.name || "Telegram");
   const st = syncBusy ? "Syncing…" : Object.keys(syncDirty).length ? (syncErr === "offline" ? "Offline, will sync later" : "Saving…") : syncAt ? `Synced ${ago(syncAt)}` : "Syncing…";
   if (compact) return `<button class="acct on" data-act="settings"><div class="acctTxt"><b>☁️ ${who}</b><small>${st} · ${liked.length} liked · ${playlists.length} playlist${playlists.length === 1 ? "" : "s"}</small></div></button>`;
-  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgLogo">${TGICON}</div><div><b>${who}</b><small>${tgMe.name && tgMe.username ? esc(tgMe.name) + " · " : ""}Signed in with Telegram ✅</small></div></div>
+  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=8" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>${who}</b><small>${tgMe.name && tgMe.username ? esc(tgMe.name) + " · " : ""}Signed in with Telegram ✅</small></div></div>
     <div class="setNote">☁️ ${st}<br>Your likes (${liked.length}), playlists (${playlists.length}), recently played and Telegram downloads (${Object.keys(dlIdx).length}) are saved to your account. Connect Telegram on any other phone to get them back.</div>
     <div class="btnRow" style="padding:10px 0 2px;margin:0"><button data-act="syncNow">Sync now</button><button data-act="tgOff" style="color:#ff453a">Log out</button></div></div>`;
 }
@@ -826,6 +826,7 @@ if ("mediaSession" in navigator) {
 if (queue[qi]) { updateMeta(queue[qi]); syncPlay(); renderQueue(); }
 syncModes();
 window.addEventListener("keydown", e => { if (e.code === "Space" && e.target.tagName !== "INPUT") { e.preventDefault(); toggle(); } });
+(function(){const s=document.getElementById("splash");if(!s)return;const hide=()=>{s.classList.add("out");setTimeout(()=>s.remove(),400)};setTimeout(hide,650);})();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 window.__m = { P, queue: () => queue, get audio() { return audio; }, doSearch, playList, lists, get mode() { return mode; }, cfg, setSaver, setEq, setPreset, download, dl: () => dlIdx, dlJobs, removeDl,
   eq() { const o = { on: eqOn, routed: eqRouted, ctx: actx && actx.state, gains: eqNodes.map(n => +n.gain.value.toFixed(2)), types: eqNodes.map(n => n.type), pre: preGain && +preGain.gain.value.toFixed(3) }; if (analyser) { const d = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(d); let sq = 0; for (const x of d) sq += x * x; o.rms = +Math.sqrt(sq / d.length).toFixed(4); } return o; } };

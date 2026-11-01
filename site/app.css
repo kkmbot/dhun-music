@@ -207,3 +207,16 @@ h1.hrow{display:flex;align-items:center;justify-content:space-between}
 .acct .tgB{flex:none;padding:9px 14px;font-size:15px}
 .acctHead{display:flex;align-items:center;gap:12px;padding:4px 2px 8px}.acctHead b{display:block;font-size:17px}.acctHead small{display:block;color:var(--sub);font-size:13px;line-height:1.4;margin-top:2px}
 .acctCard .btnRow button{flex:1}
+
+/* brand (v8) */
+#splash{position:fixed;inset:0;z-index:9999;background:#000;display:flex;align-items:center;justify-content:center;transition:opacity .35s ease}
+#splash img{width:92px;height:auto;animation:splashIn .6s ease both}
+#splash.out{opacity:0;pointer-events:none}
+@keyframes splashIn{from{opacity:0;transform:scale(.88)}to{opacity:1;transform:none}}
+.brandBar{display:flex;align-items:center;padding:0 16px 2px}
+.brandBar img{height:34px;width:auto;display:block}
+.brandFoot{display:flex;flex-direction:column;align-items:center;gap:8px;margin:18px 20px 30px;color:var(--sub);font-size:13px}
+.brandFoot img{width:38px;height:auto;opacity:.95}
+.tgPair{display:flex;align-items:center;gap:6px;flex:none}
+.tgPair .dm{width:34px;height:auto}
+.tgPair .x{color:var(--sub);font-size:13px}
