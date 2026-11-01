@@ -177,12 +177,13 @@ async function svTrending() { const j = await sv("content.getTrending", { entity
 async function svSong(id) { const j = await sv("song.getDetails", { pids: id }); const x = j.songs ? j.songs[0] : j[id]; return svTrack(x); }
 const songKey = t => String((t && t.title) || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\s*[\(\[][^\)\]]*[\)\]]/g, " ").split(/\s+[-\u2013\u2014|]\s+/)[0].replace(/\s+(eclipsa audio|dolby atmos|spatial audio|8d audio|8d|lo-?fi( flip| mix| version)?|slowed( and| &| \+)?( reverb)?|reverb|sped up|remix(ed)?|unplugged|reprise|acoustic|(female|male|sad|duet|new) version|version|title track)(?=\s|$)/g, " ").replace(/[^\p{L}\p{N}]+/gu, "") || "id:" + String(t && t.id); // same song, other release ("(From …)", compilation copy, " - New Version")
 async function svRadio(id, artist, lang, title) {
-  let items = [];
-  try { const r = await sv("reco.getreco", { pid: id }); items = svList(Array.isArray(r) ? r : []); } catch (e) {}
-  if (items.length < 5 && artist) { try { items = items.concat(await svSearch(artist.split(",")[0].trim(), 30)); } catch (e) {} }
-  if (items.length < 5) { try { items = items.concat(await svTrending()); } catch (e) {} }
-  const seen = new Set([id]), keys = new Set(title ? [songKey({ title })] : []); // one copy of each song, never the seed song again
-  return items.filter(t => !seen.has(t.id) && seen.add(t.id) && !keys.has(songKey(t)) && keys.add(songKey(t)));
+  const seen = new Set([id]), keys = new Set(title ? [songKey({ title })] : []), out = []; // one copy of each song, never the seed song again
+  const add = l => { for (const t of l || []) if (t && !seen.has(t.id) && seen.add(t.id) && !keys.has(songKey(t)) && keys.add(songKey(t))) out.push(t); };
+  if (id) { try { const r = await sv("reco.getreco", { pid: id }, "android"); add(svList(Array.isArray(r) ? r : [])); } catch (e) {} } // real "similar songs" (the web ctx answers [])
+  if (out.length < 5 && id) { try { const r = await sv("reco.getreco", { pid: id }); add(svList(Array.isArray(r) ? r : [])); } catch (e) {} }
+  if (out.length < 12 && artist) { try { add(await svSearch(artist.split(",")[0].trim(), 40)); } catch (e) {} }
+  if (out.length < 5) { try { add(await svTrending()); } catch (e) {} }
+  return out;
 }
 async function svSuggest(q) {
   const j = await sv("autocomplete.get", { query: q });
