@@ -60,7 +60,7 @@ const fmt = s => { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s /
 const small = u => u ? u.replace(/=w544-h544/, "=w226-h226") : u;
 const ytThumb = id => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
 let toastT;
-function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200); }
+function toast(msg, ms) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), ms || 2200); }
 async function api(path) { const r = await fetch(path); if (!r.ok) throw new Error(r.status); return r.json(); }
 const trackMap = new Map(); // id -> track, for click handlers
 function reg(list) { list.forEach(t => trackMap.set(t.id, t)); return list; }
@@ -311,7 +311,7 @@ function openTrackSheet(t, ctx, idx) {
     <button data-s="radio">Start Station ${ICON.note}</button>
     <button data-s="like">${isLiked(t.id) ? "Unlike" : "Love"} ${isLiked(t.id) ? ICON.heart : ICON.heartO}</button>
     <button data-s="addpl">Add to Playlist… ${ICON.pl}</button>
-    ${!NATIVE || isYT(t) ? "" : isOff(t.id) ? `<button data-s="unoff" class="danger">Remove from phone ${ICON.trash}</button>` : offJobs.has(t.id) ? `<button data-s="noop">Downloading to phone… ${ICON.dl}</button>` : `<button data-s="off">Download to phone (offline) ${ICON.dl}</button>`}
+    ${!NATIVE || isYT(t) ? "" : isOff(t.id) ? `<button data-s="unoff" class="danger">Remove from phone ${ICON.trash}</button>` : offJobs.has(t.id) ? `<button data-s="noop">Downloading to phone…<span data-offp="${esc(String(t.id))}">${offJobs.get(t.id) ? " " + offJobs.get(t.id) + "%" : ""}</span> ${ICON.dl}</button>` : `<button data-s="off">Download to phone (offline) ${ICON.dl}</button>`}
     ${isYT(t) ? "" : isDl(t.id) ? `<button data-s="undl" class="danger">Remove from Telegram ${ICON.trash}</button>` : dlJobs.has(t.id) ? `<button data-s="noop">Sending to Telegram… ${TGICON}</button>` : `<button data-s="dl">Download to Telegram ${TGICON}</button>`}
     <button data-s="share">Share Song ${ICON.share}</button>
     ${inPl ? `<button data-s="rm" class="danger">Remove from Playlist ${ICON.trash}</button>` : ""}
@@ -479,7 +479,7 @@ function offDownload(t, quiet) {
   if (isOff(t.id)) { if (!quiet) toast("Already on your phone ✓"); return; }
   if (offJobs.has(t.id)) return;
   if (!navigator.onLine) { if (!quiet) toast("You're offline"); return; }
-  offJobs.set(t.id, 1); offWait.push(slim(t)); pumpOff();
+  offJobs.set(t.id, 0); offWait.push(slim(t)); pumpOff();
   if (!quiet) toast(`Downloading “${t.title}”…`);
   dlUi();
 }
@@ -493,38 +493,92 @@ function offDownloadAll(list) {
 function pumpOff() {
   while (offActive < 2 && offWait.length) {
     const t = offWait.shift(); offActive++;
-    doOff(t).then(() => { if (offBatch) offBatch.ok++; else toast(`“${t.title}” downloaded ✅ plays offline`); })
-      .catch(e => { if (offBatch) offBatch.fail++; else toast(e && e.message && e.message.length < 90 ? e.message : `Couldn't download “${t.title}”`); })
+    doOff(t).then(lowQ => { if (offBatch) offBatch.ok++; else toast(lowQ ? `“${t.title}” downloaded ✅ (${lowQ} kbps, higher quality failed)` : `“${t.title}” downloaded ✅ plays offline`, lowQ ? 4000 : 2200); })
+      .catch(e => { if (offBatch) { offBatch.fail++; offBatch.why = (e && e.message) || ""; } else toast(e && e.message && e.message.length < 140 ? e.message : `Download failed: “${t.title}”`, 5000); })
       .finally(() => {
         offJobs.delete(t.id); offActive--;
-        if (offBatch && offBatch.ok + offBatch.fail >= offBatch.n) { toast(offBatch.fail ? `${offBatch.ok} downloaded ✅ · ${offBatch.fail} failed` : `${offBatch.ok} songs downloaded ✅ play offline`); offBatch = null; }
+        if (offBatch && offBatch.ok + offBatch.fail >= offBatch.n) { toast(offBatch.fail ? `${offBatch.ok} downloaded ✅ · ${offBatch.fail} failed${offBatch.why ? " (" + offBatch.why.replace(/^Download failed: /, "") + ")" : ""}` : `${offBatch.ok} songs downloaded ✅ play offline`, offBatch.fail ? 5000 : 2200); offBatch = null; }
         dlUi(); pumpOff();
       });
   }
+}
+// The plugin's downloadFile streams natively to disk (no base64 in JS) but does NOT create parent folders
+// (Filesystem 8.x ignores recursive there): make songs/ and covers/ first, or every download dies with ENOENT.
+let offDirsOk = false;
+async function offDirs() {
+  if (offDirsOk) return;
+  for (const d of ["songs", "covers"]) {
+    try { await FS.mkdir({ path: d, directory: "DATA", recursive: true }); }
+    catch (e) { try { await FS.stat({ path: d, directory: "DATA" }); } catch (e2) { throw new Error("mkdir " + d + ": " + ((e && e.message) || e)); } }
+  }
+  offDirsOk = true;
+}
+const offProg = new Map(); // url -> track id, for the native progress events
+if (NATIVE && FS && FS.addListener) {
+  try { FS.addListener("progress", p => {
+    const id = p && offProg.get(p.url); if (!id || !offJobs.has(id)) return;
+    const pct = p.contentLength > 0 ? Math.min(99, Math.floor(p.bytes * 100 / p.contentLength)) : 0;
+    if (pct !== offJobs.get(id)) { offJobs.set(id, pct); offProgUi(id, pct); }
+  }); } catch (e) {}
+}
+function offProgUi(id, pct) {
+  const t = queue[qi], b = $("#npDl"); if (b && t && t.id === id) b.dataset.p = pct ? pct + "%" : "…";
+  document.querySelectorAll(`[data-offp="${CSS.escape(String(id))}"]`).forEach(el => el.textContent = pct ? ` ${pct}%` : "");
+}
+function offReason(e) {
+  const m = String((e && (e.message || e.errorMessage)) || e || "");
+  if (/ENOSPC|No space left/i.test(m)) return "phone storage is full";
+  if (/UnknownHost|Unable to resolve|ENETUNREACH|ECONNREFUSED|ConnectException|failed to connect|Network is unreachable/i.test(m)) return "no internet connection";
+  if (/timed? ?out|SocketTimeout/i.test(m)) return "connection timed out";
+  if (/SSL|certificate|Handshake/i.test(m)) return "secure connection failed";
+  if (/https?:\/\/\S+/.test(m) && /FileNotFound|404|403|410/i.test(m)) return "song link expired (server said no)";
+  if (/ENOENT|No such file|mkdir|EACCES|Permission denied|read-only/i.test(m)) return "couldn't save to app storage";
+  if (/too small/i.test(m)) return "server sent an empty file";
+  return m ? m.replace(/^Error downloading file:\s*/i, "").replace(/\/data\/\S*\//g, "").slice(0, 60) : "unknown error";
+}
+async function offFetch(url, fp, id) {
+  offProg.set(url, id);
+  try {
+    await FS.downloadFile({ url, path: fp, directory: "DATA", recursive: true, progress: true, connectTimeout: 20000, readTimeout: 30000 });
+    const bytes = (await FS.stat({ path: fp, directory: "DATA" })).size || 0;
+    if (bytes <= 20000) throw new Error("file too small (" + bytes + " bytes)");
+    return bytes;
+  } catch (e) { FS.deleteFile({ path: fp, directory: "DATA" }).catch(() => {}); throw e; }
+  finally { offProg.delete(url); }
 }
 async function doOff(t) {
   let sid = t.sid || (t.src === "saavn" ? t.id : resolved[t.id] && resolved[t.id].sid);
   if (!sid) { await resolveTrack(t); sid = resolved[t.id] && resolved[t.id].sid; }
   if (!sid) throw new Error(`“${t.title}” isn't on JioSaavn, can't download it`);
-  const d = await api("/api/song?id=" + encodeURIComponent(sid));
-  const src = d.track && d.track.url; if (!src) throw new Error(`Couldn't get “${t.title}”`);
+  let d;
+  try { d = await api("/api/song?id=" + encodeURIComponent(sid)); } catch (e) { throw new Error("Download failed: couldn't reach the server"); }
+  const src = d.track && d.track.url; if (!src) throw new Error(`Couldn't get “${t.title}” from JioSaavn`);
+  // file names come from the song id only (titles can hold quotes, slashes, colons); the title lives in the index
   const safe = String(t.id).replace(/[^\w-]/g, "_").slice(0, 80), fp = `songs/${safe}.mp4`, ap = `covers/${safe}.jpg`;
-  let q = cfg.qDl, bytes = 0;
-  for (const tryQ of [...new Set([q, "160", "96"])]) {
-    try {
-      await FS.downloadFile({ url: withQ(src, tryQ), path: fp, directory: "DATA", recursive: true });
-      bytes = (await FS.stat({ path: fp, directory: "DATA" })).size || 0;
-      if (bytes > 20000) { q = kbpsOf(withQ(src, tryQ)) || tryQ; break; }
-    } catch (e) {}
+  try { await offDirs(); } catch (e) { throw new Error("Download failed: " + offReason(e)); }
+  let q = cfg.qDl, bytes = 0, lastErr = null;
+  const tries = [...new Set([q, "160", "96"])];
+  outer: for (const tryQ of tries) {
+    const url = withQ(src, tryQ);
+    for (let attempt = 0; attempt < 2; attempt++) { // each quality: one try + one retry, then fall back to lower quality
+      try { bytes = await offFetch(url, fp, t.id); q = kbpsOf(url) || tryQ; break outer; }
+      catch (e) {
+        lastErr = e; console.warn("[dhun] phone download failed", tryQ, attempt, e && e.message);
+        if (/ENOSPC|No space left/i.test(String(e && e.message))) break outer;
+        if (/ENOENT|No such file/i.test(String(e && e.message))) { offDirsOk = false; try { await offDirs(); } catch (e2) {} }
+        if (offJobs.has(t.id)) { offJobs.set(t.id, 0); offProgUi(t.id, 0); }
+      }
+    }
   }
-  if (bytes <= 20000) { FS.deleteFile({ path: fp, directory: "DATA" }).catch(() => {}); throw new Error(`Couldn't download “${t.title}”, try again`); }
+  if (!bytes) throw new Error("Download failed: " + offReason(lastErr));
   let art = "";
   const thumb = (t.thumb || (d.track && d.track.thumb) || "").replace(/(\d+)x\1(?=\.jpg)/, "500x500");
-  if (/^https?:/.test(thumb)) { try { await FS.downloadFile({ url: thumb, path: ap, directory: "DATA", recursive: true }); art = (await FS.getUri({ path: ap, directory: "DATA" })).uri; } catch (e) {} }
+  if (/^https?:/.test(thumb)) { try { await FS.downloadFile({ url: thumb, path: ap, directory: "DATA", recursive: true, connectTimeout: 15000, readTimeout: 20000 }); art = (await FS.getUri({ path: ap, directory: "DATA" })).uri; } catch (e) {} }
   const file = (await FS.getUri({ path: fp, directory: "DATA" })).uri;
   const tt = slim(t); delete tt.tg; tt.sid = sid;
   offIdx[t.id] = { t: tt, fp, ap: art ? ap : "", file, art, bytes, q, at: Date.now() }; saveOff();
   if (art) artUrls.set(t.id, offArt(t.id));
+  return String(q) !== String(kbpsOf(withQ(src, cfg.qDl)) || cfg.qDl) ? q : 0; // lower quality than asked
 }
 async function offRemove(id, quiet) {
   const d = offIdx[id]; if (!d) return; delete offIdx[id]; saveOff(); artUrls.delete(id);
@@ -605,7 +659,7 @@ function dlUi(progress) {
 function syncDlBtn() {
   const b = $("#npDl"); if (!b) return; const t = queue[qi];
   const j = t && dlJobs.get(t.id);
-  if (NATIVE) { b.innerHTML = t && isOff(t.id) ? ICON.dlDone : ICON.dl; b.classList.toggle("on", !!(t && isOff(t.id))); b.dataset.p = t && offJobs.has(t.id) ? "…" : ""; return; }
+  if (NATIVE) { b.innerHTML = t && isOff(t.id) ? ICON.dlDone : ICON.dl; b.classList.toggle("on", !!(t && isOff(t.id))); b.dataset.p = t && offJobs.has(t.id) ? (offJobs.get(t.id) ? offJobs.get(t.id) + "%" : "…") : ""; return; }
   b.innerHTML = t && isDl(t.id) ? ICON.dlDone : ICON.dl; b.classList.toggle("on", !!(t && isDl(t.id)));
   b.dataset.p = j ? "…" : "";
 }
@@ -916,7 +970,7 @@ $("#npQ").onclick = () => setSaver(!cfg.saver);
 $("#npDl").onclick = () => { const t = queue[qi]; if (!t) return;
   if (NATIVE) { // in the app this button saves the song on the phone (plays offline)
     if (isOff(t.id)) return showSheet(`<div class="sgroup"><div class="shead"><div class="t1">${esc(t.title)}</div><div class="sub">On this phone ✓ · plays without internet</div></div>${isYT(t) || isDl(t.id) ? "" : `<button data-s="tg">Also send to Telegram ${TGICON}</button>`}<button data-s="rm" class="danger">Remove from phone ${ICON.trash}</button></div>`, { rm: () => offRemove(t.id), tg: () => download(t) });
-    if (offJobs.has(t.id)) return toast("Downloading…");
+    if (offJobs.has(t.id)) return toast(offJobs.get(t.id) ? `Downloading… ${offJobs.get(t.id)}%` : "Downloading…");
     return offDownload(t);
   }
   if (isDl(t.id)) showSheet(`<div class="sgroup"><div class="shead"><div class="t1">${esc(t.title)}</div><div class="sub">In your Telegram ✓</div></div><a class="tgBtn" href="https://t.me/${esc(tgBot)}" target="_blank" rel="noopener">${TGICON}Open in Telegram</a><button data-s="rm" class="danger">Remove from Telegram ${ICON.trash}</button></div>`, { rm: () => removeDl(t.id) }); else download(t); };

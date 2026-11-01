@@ -49,7 +49,9 @@ jobs:
         working-directory: android/android
         run: |
           chmod +x gradlew
-          VERSION_CODE=$(( ${{ github.run_number }} + 1 ))
+          # android/VERSION holds the versionCode (bump it for each new release); 1.0.<code> is the version name
+          VERSION_CODE=$(cat ../VERSION 2>/dev/null | tr -dc 0-9)
+          [ -n "$VERSION_CODE" ] || VERSION_CODE=$(( ${{ github.run_number }} + 1 ))
           ./gradlew assembleRelease --no-daemon \
             -PdhunVersionCode=$VERSION_CODE \
             -PdhunVersionName=1.0.$VERSION_CODE
