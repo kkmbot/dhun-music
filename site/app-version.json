@@ -1,10 +1,10 @@
 {
-  "versionCode": 14,
-  "versionName": "1.0.1",
+  "versionCode": 15,
+  "versionName": "1.0.0",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Terms & Conditions screen ✅",
+  "notes": "Dhun 1.0.0 ✅",
   "force": false,
-  "size": 4883913,
-  "bytes": 4883913,
-  "sha256": "846cbd06ac18a60c014d5c9a505df79297f253c6a3f0689af6e205197df4a28c"
+  "size": 4879021,
+  "bytes": 4879021,
+  "sha256": "a170de5b628c6a5cf7880532cd9028af9e0c3b19d24c8d6661c8c37be395409b"
 }
