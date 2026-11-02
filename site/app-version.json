@@ -1,10 +1,10 @@
 {
-  "versionCode": 15,
-  "versionName": "1.0.0",
+  "versionCode": 16,
+  "versionName": "1.0.1",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Dhun 1.0.0 ✅",
+  "notes": "Artist page, Sleep timer, Lyrics, Album, Top charts, Mood mixes, Radio ✨",
   "force": false,
-  "size": 4879021,
-  "bytes": 4879021,
-  "sha256": "a170de5b628c6a5cf7880532cd9028af9e0c3b19d24c8d6661c8c37be395409b"
+  "size": 4886705,
+  "bytes": 4886705,
+  "sha256": "8d79f938c440a2a44fa91a97e04b039ca99c104799baf54adafbb567b1a6013e"
 }
