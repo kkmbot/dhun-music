@@ -247,7 +247,7 @@ function renderSettings() {
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button><a class="dealRow" href="${esc(deals.join || DEALS_JOIN_DEFAULT)}" target="_blank" rel="noopener"><i class="dealEmoji">🛍️</i><span>Join Deals channel <small class="sub">Daily deals</small></span></a></div>
-  ${footHTML()}<div class="verTag">v1.0.5 · web</div>`;
+  ${footHTML()}<div class="verTag">v1.0.6 · web</div>`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -4198,5 +4198,213 @@ mixAbort = function () {
   return r;
 };
 window.__mix3fn = { analyse: t => { const x = mixAnalyse(t); return x ? x.v : null; }, tempo: mx3Tempo, gains: mx3Gains, plan: (i, d) => mixPlan(i, d), cache: () => mx3Cache, ramps: () => [...mx3Ramps].map(r => ({ kind: r.kind, to: r.to, ms: r.ms, main: r.el === audio })), get state() { return mx3; } };
+
+/* ===== v30: New-user onboarding (variant A, Apple Music bubbles) — core ===== */
+
+// ===== v30 (sample): First-run music-taste onboarding — CORE (shared by variant A and B) =====
+// Paste this block, then ONE variant block (variant-A.js or variant-B.js), before the final `})();` of app.js.
+// localStorage keys (via store, so stored as m_<key>):
+//   m_onbDone  true once the person finished or skipped onboarding (first-run flag)
+//   m_onbPick  {langs:["hindi","punjabi"], artists:[{id,name,image}], at:<ms>}   (the picks)
+//   m_onbArtC  {name:{id,name,image}} artist lookup cache for chart-derived artists (7 days)
+//   m_onbHome  {sig, day, rows:[...]} the picks-based Home rows (refreshed daily / when picks change)
+const ONB_LANGS = [
+  ["hindi", "Hindi", "हिन्दी", "#ff4d6d,#8a1030"], ["english", "English", "English", "#4d8dff,#16357a"], ["punjabi", "Punjabi", "ਪੰਜਾਬੀ", "#ffb03a,#9a4a00"],
+  ["tamil", "Tamil", "தமிழ்", "#ff6b3d,#7a1f00"], ["telugu", "Telugu", "తెలుగు", "#c86bff,#4b1a7a"], ["bhojpuri", "Bhojpuri", "भोजपुरी", "#2fd39a,#00593f"],
+  ["marathi", "Marathi", "मराठी", "#ff8a3d,#8a2f00"], ["bengali", "Bengali", "বাংলা", "#ff5fa2,#7a0f45"], ["gujarati", "Gujarati", "ગુજરાતી", "#f5d04a,#806000"],
+  ["kannada", "Kannada", "ಕನ್ನಡ", "#ff4b4b,#6e0d0d"], ["malayalam", "Malayalam", "മലയാളം", "#3fd0d0,#0d5a5a"], ["haryanvi", "Haryanvi", "हरियाणवी", "#9d7bff,#33208a"],
+  ["rajasthani", "Rajasthani", "राजस्थानी", "#ff7f50,#8a3010"], ["odia", "Odia", "ଓଡ଼ିଆ", "#5fd35f,#155a15"]
+];
+const ONB_SEED = {"hindi":[["459320","Arijit Singh","artists/Arijit_Singh_004_20241118063717_150x150.jpg"],["455130","Shreya Ghoshal","artists/Shreya_Ghoshal_007_20241101074144_150x150.jpg"],["455124","Mohit Chauhan","artists/Mohit_Chauhan_150x150.jpg"],["881158","Jubin Nautiyal","artists/Jubin_Nautiyal_003_20231130204020_150x150.jpg"],["464932","Neha Kakkar","artists/Neha_Kakkar_007_20241212115832_150x150.jpg"],["455125","Sonu Nigam","artists/Sonu_Nigam_003_20260813182013_150x150.jpg"],["455109","Lata Mangeshkar","artists/Lata_Mangeshkar_004_20230623105323_150x150.jpg"],["455144","Kishore Kumar","artists/Kishore_Kumar_150x150.jpg"],["456323","Pritam","artists/Pritam_Chakraborty-20170711073326_150x150.jpg"],["456269","A.R. Rahman","artists/AR_Rahman_002_20210120084455_150x150.jpg"],["702452","Vishal Mishra","artists/Vishal_Mishra_005_20251120085316_150x150.jpg"],["3623110","Sachet Tandon","artists/Sachet_Tandon_20191129105330_150x150.jpg"],["888127","Darshan Raval","artists/Darshan_Raval_006_20250807060352_150x150.jpg"],["455782","KK","artists/KK_150x150.jpg"],["456863","Badshah","artists/Badshah_006_20241118064015_150x150.jpg"],["455275","Shankar Mahadevan","artists/Shankar_Mahadevan_150x150.jpg"],["455129","Sunidhi Chauhan","artists/Sunidhi_Chauhan_005_20250515061617_150x150.jpg"],["505312","Mohammed Rafi","artists/Mohammed_Rafi_150x150.jpg"]],"english":[["565990","Taylor Swift","artists/Taylor_Swift_003_20200226074119_150x150.jpg"],["578407","Ed Sheeran","artists/Ed_Sheeran_002_20250625073038_150x150.jpg"],["615155","The Weeknd","artists/The_Weeknd_002_20241003071400_150x150.jpg"],["568565","Justin Bieber","artists/Justin_Bieber_005_20201127112218_150x150.jpg"],["1274170","Dua Lipa","artists/Dua_Lipa_004_20231120090922_150x150.jpg"],["1918741","Billie Eilish","artists/Billie_Eilish_20190211151539_150x150.jpg"],["575153","Coldplay","artists/Coldplay_002_20241003070447_150x150.jpg"],["566404","Bruno Mars","artists/Bruno_Mars_003_20260324060413_150x150.jpg"],["589552","Ariana Grande","artists/Ariana_Grande_007_20260616180049_150x150.jpg"],["599452","Imagine Dragons","artists/Imagine_Dragons_150x150.jpg"],["603814","Sabrina Carpenter","artists/Sabrina_Carpenter_001_20250313025519_150x150.jpg"],["755042","Charlie Puth","artists/Charlie_Puth_004_20221012071125_150x150.jpg"]],"punjabi":[["468245","Diljit Dosanjh","artists/Diljit_Dosanjh_005_20231025073054_150x150.jpg"],["697691","Karan Aujla","artists/Karan_Aujla_005_20260925061936_150x150.jpg"],["3319750","Sidhu Moose Wala","artists/Sidhu_Moose_Wala_004_20250617183705_150x150.jpg"],["681966","AP Dhillon","artists/AP_Dhillon_004_20251023102150_150x150.jpg"],["14087974","Shubh","artists/Shubh_000_20220921112507_150x150.jpg"],["712878","Guru Randhawa","artists/Guru_Randhawa_005_20261026140443_150x150.jpg"],["788130","B Praak","artists/B_Praak_001_20191118112005_150x150.jpg"],["679243","Ammy Virk","artists/Ammy_Virk_005_20241101070506_150x150.jpg"],["2861360","Jassie Gill","artists/Jassie_Gill_007_20240124121355_150x150.jpg"],["672167","Harrdy Sandhu","artists/Hardy_Sandhu_001_20190913112018_150x150.jpg"],["673166","Satinder Sartaaj","artists/Satinder_Sartaaj_150x150.jpg"],["455653","Gurdas Maan","artists/Gurdas_Maan_005_20250114134730_150x150.jpg"]],"tamil":[["455663","Anirudh Ravichander","artists/Anirudh_Ravichander_003_20260121134149_150x150.jpg"],["456269","A.R. Rahman","artists/AR_Rahman_002_20210120084455_150x150.jpg"],["689580","Sid Sriram","artists/Sid_Sriram_005_20240425180600_150x150.jpg"],["456091","Yuvan Shankar Raja","artists/Yuvan_Shankar_Raja_002_20180802174245_150x150.jpg"],["455243","Harris Jayaraj","artists/Harris_Jayaraj_002_20230718071330_150x150.jpg"],["455454","G.V. Prakash Kumar","artists/G_V__Prakash_Kumar_003_20251113063655_150x150.jpg"],["455662","Dhanush","artists/Dhanush_150x150.jpg"],["455130","Shreya Ghoshal","artists/Shreya_Ghoshal_007_20241101074144_150x150.jpg"],["457536","Ilaiyaraaja","artists/Ilaiyaraaja_001_20251020081419_150x150.jpg"],["457494","D. Imman","artists/D_Imman_003_20180821182708_150x150.jpg"],["557323","Santhosh Narayanan","artists/Santhosh_Narayanan_002_20250527101718_150x150.jpg"],["773021","Hiphop Tamizha","artists/Hiphop_Tamizha_002_20230315131424_150x150.jpg"]],"telugu":[["455170","Devi Sri Prasad","artists/Devi_Sri_Prasad_008_20250619062824_150x150.jpg"],["544471","Thaman S","artists/Thaman_S__007_20231106094011_150x150.jpg"],["689580","Sid Sriram","artists/Sid_Sriram_005_20240425180600_150x150.jpg"],["2173013","Anurag Kulkarni","artists/Anurag_Kulkarni_004_20251029091123_150x150.jpg"],["813721","M. M. Keeravani","artists/M__M__Keeravani_002_20240129101710_150x150.jpg"],["544381","Mangli","artists/Mangli_Satyavathi_001_20240701121028_150x150.jpg"],["464656","Armaan Malik","artists/Armaan_Malik_006_20260813132832_150x150.jpg"],["1941508","Kaala Bhairava","artists/Kaala_Bhairava_20181003123414_150x150.jpg"],["455233","Mickey J Meyer","artists/Mickey_J_Meyer_150x150.jpg"],["673803","Sunitha Upadrasta","artists/Sunitha_Upadrashta_003_20240424064243_150x150.jpg"],["468135","Rahul Sipligunj","artists/Rahul_Sipligunj_150x150.jpg"],["1984879","Chinmayi Sripada","artists/Chinmayi_Sripada_002_20241206081603_150x150.jpg"]],"bhojpuri":[["456857","Pawan Singh","artists/Pawan_Singh_003_20241119074737_150x150.jpg"],["473591","Khesari Lal Yadav","artists/Khesari_Lal_Yadav_004_20241119074533_150x150.jpg"],["497873","Arvind Akela Kallu","artists/Arvind_Akela_004_20241230072800_150x150.jpg"],["2409737","Shilpi Raj","artists/Shilpi_Raj_003_20250310065400_150x150.jpg"],["759033","Ritesh Pandey","artists/Ritesh_Pandey_003_20230922124324_150x150.jpg"],["456985","Dinesh Lal Yadav","artists/Dinesh_Lal_Yadav_150x150.jpg"],["1197832","Neelkamal Singh","artists/Neelkamal_Singh_002_20251006060110_150x150.jpg"],["463903","Priyanka Singh","artists/Priyanka_Singh_004_20241119104131_150x150.jpg"],["532650","Ankush Raja","artists/Ankush_Raja_003_20250825092440_150x150.jpg"],["461569","Sharda Sinha","artists/Sharda_Sinha_20190327091253_150x150.jpg"],["464474","Manoj Tiwari","artists/Manoj_Tiwari_150x150.jpg"],["4504948","Antra Singh Priyanka","artists/Antra_Singh_Priyanka_004_20250227064120_150x150.jpg"]],"marathi":[["459381","Ajay-Atul","artists/Ajay_Atul_003_20230228105414_150x150.jpg"],["455853","Avadhoot Gupte","artists/Avadhoot_Gupte_003_20250227062254_150x150.jpg"],["1926984","Adarsh Shinde","artists/Adarsh_Shinde_004_20240205115913_150x150.jpg"],["455275","Shankar Mahadevan","artists/Shankar_Mahadevan_150x150.jpg"],["455109","Lata Mangeshkar","artists/Lata_Mangeshkar_004_20230623105323_150x150.jpg"],["455166","Asha Bhosle","artists/Asha_Bhosle_002_20200212082318_150x150.jpg"],["455747","Vaishali Samant","artists/Vaishali_Samant_004_20230406103655_150x150.jpg"],["455863","Swapnil Bandodkar","artists/Swapnil_Bandodkar_150x150.jpg"],["671200","Rohit Raut","artists/Rohit_Shyam_Raut_003_20251111120019_150x150.jpg"],["455748","Anand Shinde","artists/Anand_Shinde_150x150.jpg"],["455939","Bela Shende","artists/Bela_Shende_003_20240129070549_150x150.jpg"],["7008269","Kartiki Kalyanji Gaikwad","artists/Kartiki_Kalyanji_Gaikwad_000_20250114062112_150x150.jpg"]],"bengali":[["459320","Arijit Singh","artists/Arijit_Singh_004_20241118063717_150x150.jpg"],["485944","Anupam Roy","artists/Anupam_Roy_007_20250623084828_150x150.jpg"],["455130","Shreya Ghoshal","artists/Shreya_Ghoshal_007_20241101074144_150x150.jpg"],["455144","Kishore Kumar","artists/Kishore_Kumar_150x150.jpg"],["461398","Hemanta Kumar Mukhopadhyay","artists/Hemanta_Kumar_Mukhopadhyay_000_20200302140745_150x150.jpg"],["491994","Nachiketa","artists/Nachiketa_001_20210107112106_150x150.jpg"],["745699","Anirban Bhattacharya","artists/Anirban_Bhattacharya_002_20200517092625_150x150.jpg"],["503355","Rupankar Bagchi","artists/Rupankar_Bagchi_006_20241007054754_150x150.jpg"],["743118","Lagnajita Chakraborty","artists/Lagnajita_Chakraborty_003_20251029092948_150x150.jpg"],["641165","Iman Chakraborty","artists/Iman_Chakraborty_003_20250910142550_150x150.jpg"],["455135","Shaan","artists/Shaan_006_20261012091314_150x150.jpg"],["464912","Jeet Gannguli","artists/Jeet_Gannguli_003_20241209065157_150x150.jpg"]],"gujarati":[["847931","Kinjal Dave","artists/Kinjal_Dave_003_20241217095517_150x150.jpg"],["2967909","Geeta Rabari","artists/Geeta_Rabari_20191129080213_150x150.jpg"],["504549","Kirtidan Gadhvi","artists/Kirtidan_Gadhvi_005_20250320061127_150x150.jpg"],["5934787","Jignesh  Kaviraj","768/Judai-Tari-Ne-Mari-Gujarati-2018-20190122115210-150x150.jpg"],["502671","Aishwarya Majmudar","artists/Aishwarya_Majmudar_004_20260811094127_150x150.jpg"],["461968","Sachin-Jigar","artists/Sachin_Jigar_003_20251222093820_150x150.jpg"],["2235624","Osman Mir","artists/Osman_Mir_006_20211221070018_150x150.jpg"],["472266","Parthiv Gohil","artists/Parthiv_Gohil_003_20240725070359_150x150.jpg"],["496020","Rakesh Barot","artists/Rakesh_Barot_004_20250728064703_150x150.jpg"],["726807","Gaman Santhal","artists/Gaman_Santhal_002_20251117091310_150x150.jpg"],["2214608","Alpa Patel","artists/Alpa_Patel_002_20240521101938_150x150.jpg"],["1144187","Kajal Maheriya","artists/Kajal_Maheriya_20190709113326_150x150.jpg"]],"kannada":[["459588","Vijay Prakash","artists/Vijay_Prakash_007_20250225123208_150x150.jpg"],["455125","Sonu Nigam","artists/Sonu_Nigam_003_20260813182013_150x150.jpg"],["463801","Arjun Janya","artists/Arjun_Janya_004_20230327131756_150x150.jpg"],["464656","Armaan Malik","artists/Armaan_Malik_006_20260813132832_150x150.jpg"],["455130","Shreya Ghoshal","artists/Shreya_Ghoshal_007_20241101074144_150x150.jpg"],["473664","Rajesh Krishnan","artists/Rajesh_Krishnan_003_20250217132949_150x150.jpg"],["3560654","Sanjith Hegde","artists/Sanjith_Hegde_002_20230413072406_150x150.jpg"],["480239","Raghu Dixit","artists/Raghu_Dixit_150x150.jpg"],["465814","V. Harikrishna","artists/V_Harikrishna_150x150.jpg"],["743888","Chandan Shetty","artists/Chandan_Shetty_150x150.jpg"],["586996","Puneeth Rajkumar","artists/Puneeth_Rajkumar_004_20250825093702_150x150.jpg"],["487228","Anuradha Bhat","artists/Anuradha_Bhat_002_20190726074334_150x150.jpg"]],"malayalam":[["483224","K. S. Chithra","artists/K_S_Chithra_002_20190906071921_150x150.jpg"],["458475","K.J. Yesudas","artists/KJ_Yesudas_150x150.jpg"],["546310","Vineeth Sreenivasan","artists/Vineeth_Sreenivasan_003_20240508103358_150x150.jpg"],["758679","Sushin Shyam","artists/Sushin_Shyam_002_20250707125538_150x150.jpg"],["483697","Vidhu Prathap","artists/Vidhu_Prathap_150x150.jpg"],["455130","Shreya Ghoshal","artists/Shreya_Ghoshal_007_20241101074144_150x150.jpg"],["491878","M.G. Sreekumar","artists/M_G_Sreekumar_150x150.jpg"],["455179","Haricharan","artists/Haricharan_150x150.jpg"],["665344","Sithara Krishnakumar","artists/Sithara_Krishnakumar_003_20240429052356_150x150.jpg"],["663191","Gopi Sunder","artists/Gopi_Sundar_001_20190827112215_150x150.jpg"],["1720724","Hesham Abdul Wahab","artists/Hesham_Abdul_Wahab_001_20220919094035_150x150.jpg"],["8284382","Dabzee","artists/Dabzee_000_20230516072112_150x150.jpg"]],"haryanvi":[["497099","Masoom Sharma","artists/Masoom_Sharma_003_20250619064935_150x150.jpg"],["496976","Raju Punjabi","artists/Raju_Punjabi_001_20191130065747_150x150.jpg"],["5007756","Sapna Choudhary","artists/Sapna_Choudhary_000_20220916102820_150x150.jpg"],["4816353","Renuka Panwar","artists/Renuka_Panwar_004_20240715112921_150x150.jpg"],["6035935","Diler Kharkiya","artists/Diler_Kharkiya_002_20200716105505_150x150.jpg"],["4474268","Amanraj Gill","artists/Amanraj_Gill_20191130140635_150x150.jpg"],["6025448","Khasa Aala Chahar","artists/Khasa_Aala_Chahar_001_20230313111956_150x150.jpg"],["5362895","Gulzaar Chhaniwala","artists/Gulzaar_Chhaniwala_003_20200822041826_150x150.jpg"],["6870116","Pranjal Dahiya","artists/Pranjal_Dahiya_001_20250617180520_150x150.jpg"],["1984055","Ajay Hooda","artists/Ajay_Hooda_20191130140344_150x150.jpg"],["499441","Surender Romio","artists/Surender_Romio_002_20230323063812_150x150.jpg"],["5676853","Sumit Goswami","artists/Sumit_Goswami_20191130131014_150x150.jpg"]],"rajasthani":[["488256","Swaroop Khan","artists/Swaroop_Khan_150x150.jpg"],["472968","Mame Khan","artists/Mame_Khan_20191129073056_150x150.jpg"],["593932","Rapperiya Baalam","artists/Rapperiya_Baalam_001_20191203114712_150x150.jpg"],["701384","Geeta Goswami","artists/Geeta_Goswami_20191130132353_150x150.jpg"],["479436","Seema Mishra","artists/Seema_Mishra_150x150.jpg"],["847925","Kapil Jangir","artists/Kapil_Jangir_002_20261006085124_150x150.jpg"],["485382","Prakash Mali","artists/Prakash_Mali_20191130085439_150x150.jpg"],["711562","Rani Rangili","artists/Rani_Rangili_20191129073418_150x150.jpg"],["455142","Kumar Sanu","artists/Kumar_Sanu_150x150.jpg"],["670088","Sarita Kharwal","artists/Sarita_Kharwal_150x150.jpg"],["470645","Moinuddin Manchala","artists/Moinuddin_Manchala_150x150.jpg"],["456497","Ila Arun","artists/Ila_Arun_20200205103703_150x150.jpg"]],"odia":[["711881","Humane Sagar","artists/Humane_Sagar_002_20240521123429_150x150.jpg"],["485339","Ira Mohanty","artists/Ira_Mohanty_002_20240626112719_150x150.jpg"],["3706914","Babushan Mohanty","artists/Babushan_Mohanty_000_20240626112309_150x150.jpg"],["5863742","Diptirekha Padhi","artists/Diptirekha_Padhi_002_20240521110611_150x150.jpg"],["5836016","Mantu Chhuria","artists/Mantu_Chhuria_001_20240626113037_150x150.jpg"],["1746344","Satyajeet Pradhan","artists/Satyajeet_Pradhan_20191127110230_150x150.jpg"],["3919092","Sricharan Mohanty","artists/Sricharan_Mohanty_000_20260706184023_150x150.jpg"],["492887","Akshaya Mohanty","artists/Akshaya_Mohanty_150x150.jpg"],["538939","Abhijit Majumdar","artists/Abhijit_Majumdar_001_20220216115625_150x150.jpg"],["673080","Sohini Mishra","artists/Sohini_Mishra_20191127110430_150x150.jpg"],["3666633","Aseema Panda","artists/Aseema_Panda_004_20250619094741_150x150.jpg"],["495390","Tapu Mishra","artists/Tapu_Mishra_20191127110649_150x150.jpg"]]};
+const ONB_CHART = { hindi: 1, punjabi: 1, english: 1, bhojpuri: 1, haryanvi: 1 };
+const onbImg = (u, big) => { u = String(u || ""); if (!u) return "/icon-192.png"; if (!/^https?:/.test(u)) u = "https://c.saavncdn.com/" + u; return big ? u.replace("150x150", "500x500") : u; };
+const onbAnd = a => a.length > 1 ? a.slice(0, -1).join(", ") + " & " + a[a.length - 1] : (a[0] || "");
+const onbLangName = k => (ONB_LANGS.find(l => l[0] === k) || [k, k])[1];
+let onbPick = store.get("onbPick", null);
+if (!onbPick || !Array.isArray(onbPick.langs) || !Array.isArray(onbPick.artists)) onbPick = null;
+const onb = { el: null, step: 1, from: "first", langs: new Set(), artists: new Map(), pool: [], q: "", res: null, qT: 0, extra: {} };
+function onbIsNew() { return !store.get("onbDone", false) && !onbPick && !(hist.songs || []).length && !(recent || []).length; }
+function onbBasePool(langs) {
+  const lists = langs.map(l => (ONB_SEED[l] || []).map(([id, name, image]) => ({ id, name, image, lang: l })));
+  const out = [], seen = new Set();
+  for (let i = 0; i < 20; i++) for (const L of lists) { const a = L[i]; if (a && !seen.has(a.id)) { seen.add(a.id); out.push(a); } }
+  return out;
+}
+function onbPoolFor() {
+  const langs = [...onb.langs]; if (!langs.length) langs.push("hindi", "english", "punjabi");
+  const base = onbBasePool(langs); const seen = new Set(base.map(a => a.id));
+  // live: artists who are in the current Top 50 of each chosen language (real JioSaavn chart), merged in after the first row
+  const ex = []; for (const l of langs) for (const a of (onb.extra[l] || [])) if (!seen.has(a.id)) { seen.add(a.id); ex.push(a); }
+  // keep artists the person already picked (from search or earlier) visible at the front
+  const picked = [...onb.artists.values()].filter(a => !base.some(b => b.id === a.id) && !ex.some(b => b.id === a.id));
+  return [...picked, ...base.slice(0, 6), ...ex.slice(0, 8), ...base.slice(6)];
+}
+function onbChartExtras() {
+  const artC = store.get("onbArtC", {}); const fresh = artC.__at && Date.now() - artC.__at < 7 * 864e5; const C = fresh ? artC : { __at: Date.now() };
+  [...onb.langs].filter(l => ONB_CHART[l] && !onb.extra[l]).forEach(l => {
+    onb.extra[l] = [];
+    api("/api/chart?l=" + l).then(async d => {
+      const cnt = {}; for (const t of (d.items || []).slice(0, 50)) { const a = String(t.artist || "").split(",")[0].trim(); if (a) cnt[a] = (cnt[a] || 0) + 1; }
+      const known = new Set(onbBasePool([l]).map(a => a.name.toLowerCase()));
+      const names = Object.entries(cnt).sort((a, b) => b[1] - a[1]).map(x => x[0]).filter(n => !known.has(n.toLowerCase())).slice(0, 8);
+      const got = await Promise.all(names.map(n => C[n] !== undefined ? Promise.resolve(C[n]) : api("/api/artists?q=" + encodeURIComponent(n)).then(r => { const a = (r.items || [])[0]; const v = a && a.name.toLowerCase().replace(/\W/g, "") === n.toLowerCase().replace(/\W/g, "") && a.image ? { id: a.id, name: a.name, image: a.image } : null; C[n] = v; return v; }).catch(() => null)));
+      store.set("onbArtC", C);
+      onb.extra[l] = got.filter(Boolean).map(a => ({ ...a, lang: l, hot: 1 }));
+      if (onb.el && onb.step === 2 && !onb.q) onbGridPaint();
+    }).catch(() => {});
+  });
+}
+function onbOpen(from) {
+  if (onb.el) return;
+  onb.from = from || "first"; onb.step = 1; onb.q = ""; onb.res = null;
+  onb.langs = new Set(onbPick ? onbPick.langs : []); onb.artists = new Map((onbPick ? onbPick.artists : []).map(a => [a.id, a]));
+  if (!onb.langs.size && appLang === "hi") onb.langs.add("hindi");
+  const el = document.createElement("div"); el.id = "onb"; el.className = "onb " + ONB_VARIANT; el.setAttribute("data-notr", ""); el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true");
+  document.body.appendChild(el); onb.el = el;
+  el.addEventListener("click", onbClick); el.addEventListener("input", e => { if (e.target.id === "onbQ") onbSearch(e.target.value); });
+  onbPaint(); requestAnimationFrame(() => el.classList.add("in"));
+}
+function onbClose() { const el = onb.el; if (!el) return; onb.el = null; el.classList.remove("in"); el.classList.add("out"); setTimeout(() => el.remove(), 260); }
+function onbPaint() { onb.el.innerHTML = onbShellHTML(onb.step); onb.el.dataset.step = onb.step; if (onb.step === 2) { onbChartExtras(); onbGridPaint(); } onbSync(); const sc = onb.el.querySelector(".onbScroll"); if (sc) sc.scrollTop = 0; }
+function onbGridPaint() {
+  const g = onb.el && onb.el.querySelector("#onbGrid"); if (!g) return;
+  const list = onb.q ? (onb.res || []) : onbPoolFor();
+  g.innerHTML = onb.q && onb.res === null ? `<div class="onbMsg">Searching…</div>` : list.length ? list.map((a, i) => onbArtistHTML(a, onb.artists.has(a.id), i)).join("") : `<div class="onbMsg">${onb.q ? "Koi artist nahi mila. Spelling check karo." : ""}</div>`;
+}
+function onbSearch(v) {
+  onb.q = v.trim(); clearTimeout(onb.qT); if (onb.el) onb.el.classList.toggle("hasQ", !!onb.q);
+  if (!onb.q) { onb.res = null; onbGridPaint(); return; }
+  onb.res = null; onbGridPaint(); const q = onb.q;
+  onb.qT = setTimeout(() => api("/api/artists?q=" + encodeURIComponent(q)).then(d => { if (onb.q !== q) return; onb.res = (d.items || []).filter(a => a.image).slice(0, 18).map(a => ({ id: a.id, name: a.name, image: a.image })); onbGridPaint(); }).catch(() => { if (onb.q === q) { onb.res = []; onbGridPaint(); } }), 320);
+}
+function onbClick(e) {
+  const L = e.target.closest("[data-onl]"), A = e.target.closest("[data-ona]"), X = e.target.closest("[data-onx]");
+  if (L) { const k = L.dataset.onl; onb.langs.has(k) ? onb.langs.delete(k) : onb.langs.add(k); L.classList.toggle("on", onb.langs.has(k)); L.setAttribute("aria-pressed", onb.langs.has(k)); onbSync(); return; }
+  if (A) { const id = A.dataset.ona; if (onb.artists.has(id)) onb.artists.delete(id); else { const list = onb.q ? (onb.res || []) : onbPoolFor(); const a = list.find(x => x.id === id); if (a) onb.artists.set(id, { id: a.id, name: a.name, image: a.image }); } A.classList.toggle("on", onb.artists.has(id)); A.setAttribute("aria-pressed", onb.artists.has(id)); onbSync(); return; }
+  if (!X) return; const x = X.dataset.onx;
+  if (x === "next") { if (!onb.langs.size) return; onb.step = 2; onbPaint(); }
+  else if (x === "back") { onb.step = 1; onb.q = ""; onbPaint(); }
+  else if (x === "close") { if (onb.from === "first") store.set("onbDone", true); onbClose(); }
+  else if (x === "skip") onbFinish(true);
+  else if (x === "done") onbFinish(false);
+  else if (x === "clearq") { onb.q = ""; onb.res = null; const i = onb.el.querySelector("#onbQ"); if (i) i.value = ""; onbGridPaint(); }
+}
+function onbFinish(skipped) {
+  const langs = [...onb.langs]; const artists = skipped && onb.from === "first" && !onb.artists.size ? [] : [...onb.artists.values()].slice(0, 30);
+  onbPick = langs.length || artists.length ? { langs, artists, at: Date.now() } : null;
+  store.set("onbPick", onbPick); store.set("onbDone", true); store.set("onbHome", null); onbRows = null;
+  fy = null; store.set("fyCache", null);
+  onbClose();
+  if (curTab !== "home" || subView) go("home"); else rerender();
+  setTimeout(() => { try { fyLoad(true); } catch (e) {} }, 50);
+}
+// ---- Home built from the picks ----
+let onbRows = (() => { const c = store.get("onbHome", null); return c && Array.isArray(c.rows) ? c : null; })(), onbRowsLoading = false;
+const onbSig = () => onbPick ? JSON.stringify([onbPick.langs, onbPick.artists.map(a => a.id), dayKey()]) : "";
+function onbRowsLoad() {
+  if (!onbPick || onbRowsLoading) return; onbRowsLoading = true; const sig = onbSig(), p = onbPick;
+  const day = dayKey(); const rot = (arr, s) => { const n = arr.length; if (!n) return arr; const k = [...(day + s)].reduce((a, c) => a + c.charCodeAt(0), 0) % n; return arr.slice(k).concat(arr.slice(0, k)); };
+  const langs = p.langs.slice(0, 3), arts = p.artists.slice(0, 3);
+  const jobs = [
+    ...arts.map(a => api("/api/artist?id=" + encodeURIComponent(a.id)).then(d => ({ kind: "because", a, items: rot((d.items || []).slice(0, 30), a.id).slice(0, 14) }))),
+    ...langs.map(l => (ONB_CHART[l] ? api("/api/chart?l=" + l) : api("/api/search?q=" + encodeURIComponent(onbLangName(l) + " hits"))).then(d => ({ kind: "top", l, items: (d.items || []).slice(0, 15) }))),
+    ...langs.map(l => api("/api/search?q=" + encodeURIComponent("latest " + onbLangName(l) + " songs")).then(d => ({ kind: "new", l, items: (d.items || []).slice(0, 12) })))
+  ];
+  Promise.allSettled(jobs).then(rs => {
+    const ok = rs.filter(r => r.status === "fulfilled" && r.value.items.length).map(r => r.value);
+    const because = ok.filter(r => r.kind === "because"), top = ok.filter(r => r.kind === "top"), nw = ok.filter(r => r.kind === "new");
+    const rows = [];
+    const seenNew = new Set(), mix = [];
+    for (let i = 0; i < 12; i++) for (const r of nw) { const t = r.items[i]; if (t && !seenNew.has(t.id)) { seenNew.add(t.id); mix.push(t); } }
+    // order: Because #1, Top picks lang #1, New releases, Because #2, Top picks lang #2, Because #3, Top picks lang #3
+    for (let i = 0; i < 3; i++) {
+      if (because[i]) rows.push({ kind: "because", title: "Because you like " + because[i].a.name, artist: because[i].a, more: "ar:" + because[i].a.id, items: because[i].items });
+      if (top[i]) rows.push({ kind: "top", title: "Top picks in " + onbLangName(top[i].l), l: top[i].l, more: ONB_CHART[top[i].l] ? "chart:" + top[i].l : "", q: onbLangName(top[i].l) + " hits", items: top[i].items });
+      if (i === 0 && mix.length) rows.push({ kind: "new", title: "New in " + onbAnd(langs.map(onbLangName)), q: "latest " + onbLangName(langs[0]) + " songs", items: mix.slice(0, 15) });
+    }
+    if (rows.length) { onbRows = { sig, day, rows }; store.set("onbHome", onbRows); if (curTab === "home" && !subView) rerender(); }
+  }).finally(() => { onbRowsLoading = false; });
+}
+function onbHomeHTML() {
+  if (!onbPick) return "";
+  const p = onbPick; let h = "";
+  if (p.artists.length) h += `<h2 class="onbH">Your artists <a data-act="onbOpen">Edit</a></h2><div class="car onbArts" data-notr>${p.artists.slice(0, 20).map(a => `<button class="onbArt" data-coll="ar:${esc(a.id)}"><img loading="lazy" src="${esc(onbImg(a.image, true))}" alt="" onerror="this.onerror=null;this.src='/icon-192.png'"><span>${esc(a.name)}</span></button>`).join("")}</div>`;
+  const fresh = onbRows && onbRows.sig === onbSig();
+  if (!fresh) setTimeout(onbRowsLoad, 0);
+  if (!onbRows) return h + `<h2>${p.artists[0] ? "Because you like " + esc(p.artists[0].name) : "Top picks in " + esc(onbLangName(p.langs[0] || "hindi"))}</h2><div class="car">${Array(4).fill('<div class="tile"><img class="skel"></div>').join("")}</div>`;
+  onbRows.rows.forEach((r, ri) => {
+    const ctx = "onb" + ri; bindList(ctx, r.items);
+    const more = r.more ? `<a data-coll="${esc(r.more)}">See All</a>` : r.q ? `<a data-q="${esc(r.q)}">See All</a>` : "";
+    const head = r.kind === "because" ? `<span class="onbBy"><img src="${esc(onbImg(r.artist.image))}" alt="" onerror="this.remove()"><span><small>Because you like</small>${esc(r.artist.name)}</span></span>` : r.kind === "new" ? `<span class="onbBy onbTag"><i>NEW</i><span><small>Fresh releases</small>${esc(r.title.replace(/^New in /, ""))}</span></span>` : `<span class="onbBy onbTag"><i>TOP</i><span><small>Top picks in</small>${esc(onbLangName(r.l))}</span></span>`;
+    h += `<h2 class="onbRowH" data-notr>${head}${more}</h2><div class="car">${r.items.map((t, i) => tileHTML(t, i, ctx)).join("")}</div>`;
+  });
+  return h;
+}
+// For You: picked artists + languages feed /api/foryou until the listening history takes over
+const onbRawFyProfile = fyProfile;
+fyProfile = function () {
+  const pr = onbRawFyProfile(); if (!onbPick) return pr;
+  const pa = onbPick.artists.map(a => a.name);
+  pr.artists = [...new Set(pr.seeds.length >= 3 ? [...pr.artists, ...pa] : [...pa, ...pr.artists])].slice(0, 3);
+  pr.langs = [...new Set([...pr.langs, ...onbPick.langs])].slice(0, 2);
+  return pr;
+};
+const onbRawRenderHome = renderHome;
+renderHome = function () {
+  onbRawRenderHome();
+  if (subView || !onbPick || view.querySelector(".onbRowH, .onbArts")) return;
+  const fyH = view.querySelector("#fyRow");
+  if (fyH && fy && fy.mode !== "personal") fyH.firstChild.textContent = "Made For You ";
+  const tmp = document.createElement("div"); tmp.innerHTML = onbHomeHTML();
+  const fyCar = fyH && fyH.nextElementSibling;
+  const anchor = fyCar && fyCar.classList.contains("car") ? fyCar : null;
+  if (anchor) { // Your artists goes above For You; picks rows right after it
+    const arts = [...tmp.children].filter(n => n.classList.contains("onbArts") || (n.classList.contains("onbH")));
+    arts.forEach(n => fyH.before(n)); anchor.after(...tmp.childNodes);
+  } else { const firstH2 = view.querySelector("h2"); if (firstH2) firstH2.before(...tmp.childNodes); else view.append(...tmp.childNodes); }
+};
+// Settings: "Change music taste"
+const onbRawRenderSettings = renderSettings;
+renderSettings = function () {
+  onbRawRenderSettings();
+  if (view.querySelector("[data-act=onbOpen]")) return;
+  const p = onbPick; const sub = p ? [p.langs.map(onbLangName).join(", "), p.artists.length ? p.artists.length + " artists" : ""].filter(Boolean).join(" · ") : "Languages aur favourite artists chuno";
+  const tmp = document.createElement("div");
+  tmp.innerHTML = `<h2>Music taste</h2><div class="setCard"><button class="setRow" data-act="onbOpen"><span><b>Change music taste 🎧</b><small data-notr>${esc(sub)}</small></span><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" style="opacity:.5"><path d="M9 6l6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z"/></svg></button></div>`;
+  const ac = [...view.querySelectorAll("h2")].find(h => /AutoMix/.test(h.textContent)) || view.querySelectorAll("h2")[1];
+  if (ac) ac.before(...tmp.childNodes); else view.append(...tmp.childNodes);
+};
+document.addEventListener("click", e => { const b = e.target.closest("[data-act=onbOpen]"); if (b) { e.preventDefault(); e.stopPropagation(); onbOpen("settings"); } }, true);
+window.__onb = { open: onbOpen, pick: () => onbPick, rows: () => onbRows, reset: () => { store.set("onbDone", false); store.set("onbPick", null); store.set("onbHome", null); onbPick = null; onbRows = null; } };
+setTimeout(() => { if (onbIsNew()) onbOpen("first"); }, 350);
+/* ===== v30: onboarding variant A ===== */
+// HOW TO APPLY: paste onb-core.js, then this file, before the final `})();` of app.js (after all other blocks). See README.md.
+
+// ===== v30 (sample): onboarding VARIANT A — Apple Music style (bubbles) =====
+const ONB_VARIANT = "onbA";
+const ONB_CHK = ''; // the check mark is drawn in CSS (em::before)
+function onbShellHTML(step) {
+  const dots = `<div class="onbDots"><i class="${step === 1 ? "on" : "done"}"></i><i class="${step === 2 ? "on" : ""}"></i></div>`;
+  const top = `<div class="onbTop">${step === 2 ? `<button class="onbIcon" data-onx="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15.4 7.4L14 6l-6 6 6 6 1.4-1.4L10.8 12z" fill="currentColor"/></svg></button>` : `<span class="onbIcon"></span>`}${dots}${onb.from === "settings" ? `<button class="onbIcon" data-onx="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M18.3 7.1L16.9 5.7 12 10.6 7.1 5.7 5.7 7.1l4.9 4.9-4.9 4.9 1.4 1.4 4.9-4.9 4.9 4.9 1.4-1.4-4.9-4.9z" fill="currentColor"/></svg></button>` : `<span class="onbIcon"></span>`}</div>`;
+  if (step === 1) return `<div class="onbGlow"></div>${top}<div class="onbScroll"><div class="onbHead"><img class="onbMark" src="/dhun-mark.webp" alt="" width="44" height="44"><h1>Kaunsi bhasha ke gaane pasand hain?</h1><p>Tap the languages you love. Jitni chaho utni.</p></div>
+    <div class="onbBubs">${ONB_LANGS.map(([k, n, nat, g], i) => `<button class="onbLb z${i % 4}${onb.langs.has(k) ? " on" : ""}" data-onl="${k}" aria-pressed="${onb.langs.has(k)}" style="--g:${g};--d:${(i % 5) * -0.7}s"><span class="bub"><b>${esc(n)}</b>${nat !== n ? `<small>${esc(nat)}</small>` : ""}<em>${ONB_CHK}</em></span></button>`).join("")}</div></div>
+    <div class="onbBar"><button class="onbGhost" data-onx="close">${onb.from === "settings" ? "Cancel" : "Skip"}</button><button class="onbPill" data-onx="next"><span data-onc></span>Next</button></div>`;
+  return `<div class="onbGlow g2"></div>${top}<div class="onbScroll"><div class="onbHead"><h1>Apne favourite artists chuno</h1><p data-onlangs>${esc([...onb.langs].map(onbLangName).join(" · "))}</p></div>
+    <label class="onbSearch"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 109.5 16a6.5 6.5 0 004.2-1.6l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 110-9 4.5 4.5 0 010 9z" fill="currentColor"/></svg><input id="onbQ" type="search" placeholder="Search artists" autocomplete="off" enterkeyhint="search" value="${esc(onb.q)}"><button data-onx="clearq" aria-label="Clear">✕</button></label>
+    <div class="onbArtB" id="onbGrid"></div></div>
+    <div class="onbBar"><button class="onbGhost" data-onx="skip">Skip</button><button class="onbPill" data-onx="done"><span data-onc></span>Done</button></div>`;
+}
+function onbArtistHTML(a, on, i) {
+  return `<button class="onbAb z${i % 6}${on ? " on" : ""}" data-ona="${esc(a.id)}" aria-pressed="${on}" style="--d:${(i % 7) * -0.6}s"><span class="bub"><img loading="lazy" decoding="async" src="${esc(onbImg(a.image, true))}" alt="" onerror="this.onerror=null;this.src='/icon-192.png'"><em>${ONB_CHK}</em></span><b>${esc(a.name)}</b></button>`;
+}
+function onbSync() {
+  const el = onb.el; if (!el) return;
+  const n = onb.step === 1 ? onb.langs.size : onb.artists.size;
+  const c = el.querySelector("[data-onc]"); if (c) c.textContent = n ? n + " · " : "";
+  const nx = el.querySelector("[data-onx=next]"); if (nx) nx.disabled = !onb.langs.size;
+  const sk = el.querySelector("[data-onx=skip]"); if (sk) sk.style.visibility = onb.artists.size ? "hidden" : "";
+  el.classList.toggle("hasQ", !!onb.q);
+}
+/* ===== end v30 onboarding ===== */
 
 })();

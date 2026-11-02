@@ -207,7 +207,7 @@ async function svArtists(q) {
   }
   out.sort((a, b) => (b.ctr > 0) - (a.ctr > 0) || b.ctr - a.ctr);
   const r = (out.some(a => a.image) ? out.filter(a => a.image) : out).slice(0, 8).map(({ id, name, image }) => ({ id, name, image }));
-  memSet(k, r, 3600); return r;
+  memSet(k, r, r.length ? 3600 : 30); /* v30: never hold an empty answer for an hour */ return r;
 }
 // All of an artist's songs: JioSaavn pages of 50 (android ctx; the web ctx gives ~10), one copy of each song (songKey), the artist's own songs first
 const AR_MAX = 300;
