@@ -1,10 +1,10 @@
 {
-  "versionCode": 16,
-  "versionName": "1.0.1",
+  "versionCode": 17,
+  "versionName": "1.0.2",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Artist page, Sleep timer, Lyrics, Album, Top charts, Mood mixes, Radio ✨",
+  "notes": "Naya: Apple jaisi Lyrics, Podcasts, Widget, AutoMix 2, Artist follow, Share card, Speed & Bass Boost, Bhasha: English/Hinglish/Hindi ✨",
   "force": false,
-  "size": 4886705,
-  "bytes": 4886705,
-  "sha256": "8d79f938c440a2a44fa91a97e04b039ca99c104799baf54adafbb567b1a6013e"
+  "size": 4963823,
+  "bytes": 4963823,
+  "sha256": "628ef4b1180e60c41e557197c5216e4c446f029bd790850453f9ef7bf1ee8b79"
 }
