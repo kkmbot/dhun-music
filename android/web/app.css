@@ -457,3 +457,40 @@ button,input,select,textarea{font-family:inherit}
 #jamChatSend{flex:none;width:42px;height:42px;border-radius:21px;background:var(--acc);color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center}
 
 .verTag{font-size:11px;color:var(--sub,#8e8e93);opacity:.7;text-align:right;padding:6px 18px 18px;letter-spacing:.2px}
+/* v21: Artists / Albums rows, collection pages, charts + moods, lyrics, sleep timer */
+.arH{margin-top:14px}
+.arCar{gap:16px;padding-bottom:6px}
+.arTile{flex:none;width:96px;display:flex;flex-direction:column;align-items:center;gap:7px;scroll-snap-align:start;text-align:center}
+.arTile .t1{font-size:13.5px;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alTile{width:130px}.alTile img{width:130px;height:130px}
+.arPic,.cPic{position:relative;display:block;width:88px;height:88px;border-radius:50%;overflow:hidden;background:var(--card2,#2c2c2e);flex:none}
+.cPic{border-radius:10px}
+.arPic svg,.cPic svg{position:absolute;inset:22%;width:56%;height:56%;fill:rgba(255,255,255,.35)}
+.arPic img,.cPic img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1}
+.arPic.big,.cPic.big{width:170px;height:170px;margin:4px auto 0;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+.cPic.grad{display:flex;align-items:center;justify-content:center}.cPic.grad b{font-size:64px}
+.arHero{text-align:center;padding:4px 20px 8px}
+.arHero h1{margin:14px 0 2px;padding:0;font-size:28px}
+.arHero .sub{color:var(--sub);font-size:14px}
+.arBtns .arAll{background:var(--acc,#fa2d48);color:#fff}
+.arList{padding-bottom:20px}
+#npArtist.arLink{cursor:pointer}
+.cTile .cArt{display:flex;flex-direction:column;justify-content:flex-end;width:150px;height:150px;border-radius:10px;padding:12px;color:#fff;text-align:left;box-sizing:border-box;position:relative;overflow:hidden}
+.cTile .cArt b{font-size:21px;line-height:1.1}.cTile .cArt small{font-size:13px;opacity:.85;margin-top:2px}
+.cTile .cArt i{font-style:normal;font-size:44px;position:absolute;top:10px;right:12px}
+#lyrPanel{margin-top:14px;background:rgba(0,0,0,.25);border-radius:14px;padding:10px 0;overflow-y:auto;flex:1;min-height:30vh;-webkit-overflow-scrolling:touch}
+#lyrPanel.hidden{display:none}
+#lyrPanel .qHead span{color:rgba(255,255,255,.6);font-size:13px;margin-left:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lyrBody{padding:6px 18px 40vh}
+.lyrBody.plain{font-size:18px;line-height:1.6;color:rgba(255,255,255,.88);padding-bottom:24px}
+.lyrBody.synced p{margin:0;padding:7px 0;font-size:22px;font-weight:700;line-height:1.3;color:rgba(255,255,255,.38);transition:color .25s,transform .25s;transform-origin:left center;cursor:pointer}
+.lyrBody.synced p.gap{font-size:16px}
+.lyrBody.synced p.cur{color:#fff;transform:scale(1.04)}
+.lyrNone{padding:30px 18px;text-align:center;color:rgba(255,255,255,.7);font-size:16px}
+.lyrRetry{margin-top:12px;background:rgba(255,255,255,.15);color:#fff;border-radius:10px;padding:8px 14px;font-weight:600}
+#np.lopen #npArtWrap{max-height:16vh;width:auto;margin:1vh auto 1.5vh}
+#np.lopen #lyrPanel{min-height:38vh}
+#npSleep{position:relative}
+#npSleep small{position:absolute;right:-4px;top:-4px;font-size:10px;font-weight:700;background:var(--acc,#fa2d48);color:#fff;border-radius:8px;padding:0 4px;line-height:15px;min-width:8px}
+#npSleep small:empty{display:none}
+.chevR svg{width:16px;height:16px;transform:rotate(180deg);fill:rgba(255,255,255,.45)}

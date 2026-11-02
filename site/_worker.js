@@ -179,11 +179,160 @@ const songKey = t => String((t && t.title) || "").toLowerCase().normalize("NFKD"
 async function svRadio(id, artist, lang, title) {
   const seen = new Set([id]), keys = new Set(title ? [songKey({ title })] : []), out = []; // one copy of each song, never the seed song again
   const add = l => { for (const t of l || []) if (t && !seen.has(t.id) && seen.add(t.id) && !keys.has(songKey(t)) && keys.add(songKey(t))) out.push(t); };
-  if (id) { try { const r = await sv("reco.getreco", { pid: id }, "android"); add(svList(Array.isArray(r) ? r : [])); } catch (e) {} } // real "similar songs" (the web ctx answers [])
-  if (out.length < 5 && id) { try { const r = await sv("reco.getreco", { pid: id }); add(svList(Array.isArray(r) ? r : [])); } catch (e) {} }
+  if (id) { try { const r = await sv("reco.getreco", { pid: id }, "android"); add(svList(Array.isArray(r) ? r : (r && r[id]) || [])); } catch (e) {} } // real "similar songs" (the web ctx answers [])
+  if (out.length < 5 && id) { try { const r = await sv("reco.getreco", { pid: id }); add(svList(Array.isArray(r) ? r : (r && r[id]) || [])); } catch (e) {} }
   if (out.length < 12 && artist) { try { add(await svSearch(artist.split(",")[0].trim(), 40)); } catch (e) {} }
   if (out.length < 5) { try { add(await svTrending()); } catch (e) {} }
   return out;
+}
+// ---------- Artists: "Artists" row in search + artist page with every song ("Sab chalao") ----------
+const AR_COMBO = /[,&|;+]|\s(feat\.?|ft\.?|x|and|with)\s/i; // "Pritam & Arijit Singh", "A, B" are song credits, not one artist
+const AR_STOP = new Set(["songs", "song", "gaane", "gane", "gaana", "gana", "hits", "hit", "best", "top", "new", "latest", "all", "of", "by", "ke", "ki", "ka", "mp3", "music", "lyrics", "video", "audio", "playlist", "jukebox"]);
+const arNorm = s => ent(s).toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const arImg = (s, z) => (!s || /artist-default|\/_i\//.test(s)) ? "" : String(s).replace(/(50x50|150x150|500x500)/, z || "500x500");
+async function svArtists(q) {
+  const words = arNorm(q).split(" ").filter(w => w && !AR_STOP.has(w));
+  if (!words.length || words.join("").length < 2) return [];
+  const k = "ars:" + words.join(" "); const h = memGet(k); if (h) return h;
+  const j = await sv("search.getArtistResults", { q: words.join(" "), n: "20", p: "1" });
+  const out = [];
+  for (const x of (j && j.results) || []) {
+    const name = ent(x.name || "").replace(/[\u2060\u200b\u200c\u200d\ufeff]/g, "").trim();
+    if (!name || x.type && x.type !== "artist" || AR_COMBO.test(" " + name + " ")) continue;
+    const nw = arNorm(name).split(" ");
+    if (!words.every(w => nw.some(n => n.startsWith(w)))) continue; // every word of the search is in the name
+    const image = arImg(x.image, "150x150"), ctr = +x.ctr || 0;
+    if (!image && !ctr) continue; // nameless duplicates JioSaavn keeps for credits
+    out.push({ id: String(x.id), name, image, ctr });
+  }
+  out.sort((a, b) => (b.ctr > 0) - (a.ctr > 0) || b.ctr - a.ctr);
+  const r = (out.some(a => a.image) ? out.filter(a => a.image) : out).slice(0, 8).map(({ id, name, image }) => ({ id, name, image }));
+  memSet(k, r, 3600); return r;
+}
+// All of an artist's songs: JioSaavn pages of 50 (android ctx; the web ctx gives ~10), one copy of each song (songKey), the artist's own songs first
+const AR_MAX = 300;
+async function svArtist(id, ctx) {
+  const k = "ar2:" + id; const h = memGet(k); if (h) return h;
+  const ck = new Request("https://dhun.sites.tab.bot/__cache/ar2/" + id);
+  try { const c = await caches.default.match(ck); if (c) { const j = await c.json(); if (j && Array.isArray(j.items) && j.items.length) { memSet(k, j, 1800); return j; } } } catch (e) {}
+  const page = p => sv("artist.getArtistPageDetails", { artistId: id, page: String(p), category: "", sort_order: "", n_song: "50", n_album: "0" }, "android").catch(() => null);
+  const songsOf = r => { const t = r && r.topSongs; return (Array.isArray(t) ? t : (t && t.songs)) || []; };
+  const range = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
+  let pages = await Promise.all(range(0, 12).map(page));
+  const head = pages.find(Boolean);
+  if (!head) throw new Error("artist not found");
+  const seen = new Set(), keys = new Set(), own = [], feat = [];
+  const add = list => { for (const x of list) { if (!x || !x.id || seen.has(x.id) || (x.type && x.type !== "song")) continue; seen.add(x.id); const sk = songKey({ title: ent(x.title || x.song), id: x.id }); if (keys.has(sk)) continue; keys.add(sk); const m = x.more_info || {}; const pa = (m.artistMap && m.artistMap.primary_artists) || []; (pa.some(a => String(a.id) === id) ? own : feat).push(x); } };
+  for (const p of pages) add(songsOf(p));
+  if (own.length + feat.length < AR_MAX && songsOf(pages[11]).length >= 50) { pages = await Promise.all(range(12, 24).map(page)); for (const p of pages) add(songsOf(p)); }
+  const items = svList(own.concat(feat).slice(0, AR_MAX));
+  const tt = head.topSongs && !Array.isArray(head.topSongs) ? +head.topSongs.total || 0 : 0;
+  const o = { id, name: ent(head.name || ""), image: arImg(head.image, "500x500"), followers: +head.follower_count || +head.fan_count || 0, verified: !!head.isVerified, lang: head.dominantLanguage || "", total: tt, items };
+  if (items.length) {
+    memSet(k, o, 3 * 3600);
+    try { const p = caches.default.put(ck, new Response(JSON.stringify(o), { headers: { "content-type": "application/json", "cache-control": "public, max-age=21600" } })); if (ctx && ctx.waitUntil) ctx.waitUntil(p.catch(() => {})); } catch (e) {}
+  }
+  return o;
+}
+async function svArtistByName(name, ctx) { // the now-playing artist name -> that artist's page
+  const first = String(name || "").split(/,|&| x | feat\.? | ft\.? /i)[0].trim(); if (!first) throw new Error("no name");
+  const l = await svArtists(first); const n = arNorm(first);
+  const hit = l.find(a => arNorm(a.name) === n) || l[0]; if (!hit) throw new Error("artist not found");
+  return svArtist(hit.id, ctx);
+}
+// Album page: JioSaavn album (by id, or by one of its songs)
+async function svAlbum(id, songId) {
+  if (!id && songId) { const j = await sv("song.getDetails", { pids: songId }); const x = j.songs ? j.songs[0] : j[songId]; id = String((x && x.more_info && x.more_info.album_id) || ""); }
+  if (!/^\d{1,15}$/.test(id || "")) throw new Error("no album");
+  const k = "al:" + id; const h = memGet(k); if (h) return h;
+  const d = await sv("content.getAlbumDetails", { albumid: id });
+  const m = d.more_info || {}; const pa = ((m.artistMap && m.artistMap.primary_artists) || []).map(a => ent(a.name).trim()).filter(Boolean).slice(0, 3).join(", ");
+  const o = { id, kind: "album", name: ent(d.title || "Album"), image: arImg(d.image, "500x500"), year: d.year || "", artist: pa || ent(m.music || d.subtitle || "").split(",").map(s => s.trim()).filter(Boolean).slice(0, 3).join(", "), lang: d.language || "", items: svList(d.list) };
+  if (o.items.length) memSet(k, o, 6 * 3600); return o;
+}
+// A JioSaavn playlist as a play-all list (charts): one copy of each song, up to 100
+const CHARTS = { hindi: ["1134543272", "Hindi: India Superhits Top 50"], punjabi: ["1134543511", "Punjabi: India Superhits Top 50"], english: ["1134595537", "International : India Superhits Top 50"], bhojpuri: ["1134768973", "Bhojpuri: India Superhits Top 50"], haryanvi: ["1134770917", "Haryanvi: India Superhits Top 50"], trending: ["110858205", "Trending Today"] };
+const dedupeSongs = (l, max) => { const ids = new Set(), keys = new Set(), out = []; for (const t of l) { if (!t || ids.has(t.id)) continue; ids.add(t.id); const sk = songKey(t); if (keys.has(sk)) continue; keys.add(sk); out.push(t); if (out.length >= max) break; } return out; };
+async function svPlFull(id, n = 100) {
+  const d = await sv("playlist.getDetails", { listid: id, n: String(n), p: "1" });
+  return { id, name: ent(d.title || d.listname || "Playlist"), image: arImg(d.image, "500x500"), items: dedupeSongs(svList(d.list), n) };
+}
+async function svChart(lang) {
+  const c = CHARTS[lang]; if (!c) throw new Error("no chart");
+  const k = "chart:" + lang; const h = memGet(k); if (h) return h;
+  let o = null; try { o = await svPlFull(c[0], 100); } catch (e) {}
+  if (!o || o.items.length < 10) { const pr = await sv("search.getPlaylistResults", { q: lang + " top 50", n: "3", p: "1" }); const pl = (pr.results || [])[0]; if (pl) o = await svPlFull(pl.id, 100); }
+  if (!o || !o.items.length) throw new Error("empty chart");
+  o = { ...o, kind: "chart" }; memSet(k, o, 3 * 3600); return o;
+}
+// Mood mixes: 2-3 editorial JioSaavn playlists for the mood, interleaved, one copy of each song
+const MOODS = { romantic: ["romantic hindi", "love songs hindi"], sad: ["sad songs hindi", "heartbreak hindi"], party: ["party hindi", "bollywood party"], gym: ["workout hindi", "gym motivation"], bhakti: ["bhakti songs hindi", "bhajan"], lofi: ["lofi hindi", "lofi bollywood"] };
+async function svMood(m) {
+  const qs = MOODS[m]; if (!qs) throw new Error("no mood");
+  const k = "mood:" + m; const h = memGet(k); if (h) return h;
+  const found = [];
+  for (const q of qs) { try { const pr = await sv("search.getPlaylistResults", { q, n: "8", p: "1" }); const l = (pr.results || []).filter(x => x && x.id && +((x.more_info || {}).song_count || 0) >= 10); l.sort((a, b) => (((b.more_info || {}).firstname === "JioSaavn") - ((a.more_info || {}).firstname === "JioSaavn"))); for (const x of l) if (!found.includes(x.id)) found.push(x.id); } catch (e) {} if (found.length >= 3) break; }
+  const lists = (await Promise.all(found.slice(0, 3).map(id => sv("playlist.getDetails", { listid: id, n: "60", p: "1" }).then(d => svList(d.list)).catch(() => [])))).filter(l => l.length);
+  const mixed = []; for (let i = 0; i < 60; i++) for (const l of lists) if (l[i]) mixed.push(l[i]);
+  const items = dedupeSongs(mixed, 150);
+  if (!items.length) throw new Error("empty mood");
+  const o = { id: m, kind: "mood", name: m, image: "", items }; memSet(k, o, 6 * 3600); return o;
+}
+// Lyrics: lrclib.net (synced LRC when it has it) -> JioSaavn plain lyrics
+const lyrClean = s => ent(s).replace(/\s*[\(\[][^\)\]]*[\)\]]/g, " ").split(/\s+[-\u2013\u2014|]\s+/)[0].replace(/\s+/g, " ").trim();
+async function lrclib(path, params) {
+  const u = new URL("https://lrclib.net/api/" + path); for (const [a, b] of Object.entries(params)) if (b) u.searchParams.set(a, b);
+  const r = await tfetch(u.toString(), { headers: { "user-agent": "Dhun/1.0 (https://dhun.sites.tab.bot)", accept: "application/json" } }, 6000);
+  if (r.status === 404) return null; if (!r.ok) throw new Error("lrclib " + r.status); return r.json();
+}
+async function getLyrics(b, ctx) {
+  const title = lyrClean(b.title || ""), artist = ent(b.artist || "").split(/,|&| x | feat\.? | ft\.? /i)[0].trim(), dur = Math.round(+b.dur || 0), sid = /^[\w-]{6,12}$/.test(b.id || "") ? b.id : "";
+  if (!title) return { synced: "", plain: "", source: "" };
+  const k = "lyr2:" + (sid || "") + ":" + title.toLowerCase() + "|" + artist.toLowerCase() + "|" + dur;
+  const h = memGet(k); if (h) return h;
+  const ck = new Request("https://dhun.sites.tab.bot/__cache/lyr2/" + encodeURIComponent(k));
+  try { const c = await caches.default.match(ck); if (c) { const j = await c.json(); memSet(k, j, 3600); return j; } } catch (e) {}
+  let hit = null, upstreamOk = false;
+  const okDur = x => !dur || !x.duration || Math.abs(x.duration - dur) <= 6;
+  const arts = ent(b.artist || "").split(/,|&| x | feat\.? | ft\.? /i).map(x => x.trim()).filter(Boolean).slice(0, 2);
+  for (const a of (dur ? arts : [])) { if (hit) break; try { const g = await lrclib("get", { track_name: title, artist_name: a, duration: String(dur) }); upstreamOk = true; if (g && (g.syncedLyrics || g.plainLyrics) && !g.instrumental) hit = g; } catch (e) {} }
+  if (!hit || !hit.syncedLyrics) { try { const l = await lrclib("search", { track_name: title, artist_name: artist }); upstreamOk = true; const c = (l || []).filter(x => x && !x.instrumental && (x.syncedLyrics || x.plainLyrics) && okDur(x)); const best = c.find(x => x.syncedLyrics) || c[0]; if (best && (!hit || best.syncedLyrics)) hit = best; } catch (e) {} }
+  if (!hit && dur) { try { const l = await lrclib("search", { track_name: title }); upstreamOk = true; const c = (l || []).filter(x => x && !x.instrumental && (x.syncedLyrics || x.plainLyrics) && x.duration && Math.abs(x.duration - dur) <= 3); hit = c.find(x => x.syncedLyrics) || c[0] || null; } catch (e) {} }
+  if (!hit) { try { const l = await lrclib("search", { q: title + " " + artist }); upstreamOk = true; const tn = title.toLowerCase(); const c = (l || []).filter(x => x && !x.instrumental && (x.syncedLyrics || x.plainLyrics) && okDur(x) && String(x.trackName || "").toLowerCase().includes(tn)); hit = c.find(x => x.syncedLyrics) || c[0] || null; } catch (e) {} }
+  let o = hit ? { synced: hit.syncedLyrics || "", plain: hit.plainLyrics || "", source: "lrclib" } : null;
+  if (!o && sid) { try { const j = await sv("lyrics.getLyrics", { lyrics_id: sid }); upstreamOk = true; const t = ent(String((j && j.lyrics) || "")).replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim(); if (t) o = { synced: "", plain: t, source: "jiosaavn" }; } catch (e) {} }
+  if (!o) o = { synced: "", plain: "", source: "" };
+  if (o.plain || o.synced || upstreamOk) {
+    memSet(k, o, o.plain || o.synced ? 6 * 3600 : 1800);
+    try { const p = caches.default.put(ck, new Response(JSON.stringify(o), { headers: { "content-type": "application/json", "cache-control": `public, max-age=${o.plain || o.synced ? 86400 : 3600}` } })); if (ctx && ctx.waitUntil) ctx.waitUntil(p.catch(() => {})); } catch (e) {}
+  }
+  return o;
+}
+async function svAlbumsSearch(q) {
+  const words = arNorm(q).split(" ").filter(w => w && !AR_STOP.has(w)); if (!words.length) return [];
+  const k = "als:" + words.join(" "); const h = memGet(k); if (h) return h;
+  const j = await sv("search.getAlbumResults", { q: words.join(" "), n: "10", p: "1" });
+  const r = ((j && j.results) || []).filter(x => x && x.id && (!x.type || x.type === "album")).map(x => ({ id: String(x.id), name: ent(x.title || ""), image: arImg(x.image, "150x150"), year: x.year || "", sub: ent((x.more_info && x.more_info.music) || x.subtitle || "").split(",").map(s => s.trim()).filter(Boolean).slice(0, 2).join(", ") })).filter(a => a.name && a.image).filter((a, i, l) => l.findIndex(b => b.name.toLowerCase() === a.name.toLowerCase() && b.year === a.year) === i).slice(0, 8);
+  memSet(k, r, 3600); return r;
+}
+async function svRadioLong(id, artist, lang, title) { // "Radio shuru karo": a long queue — similar songs, then songs similar to those, then the artist's hits
+  const out = await svRadio(id, artist, lang, title);
+  const seen = new Set([id, ...out.map(t => t.id)]), keys = new Set([songKey({ title }), ...out.map(songKey)]);
+  const add = l => { for (const t of l || []) if (t && !seen.has(t.id) && !keys.has(songKey(t))) { seen.add(t.id); keys.add(songKey(t)); out.push(t); } };
+  const pick = out.filter((t, i) => i % 2 === 0).slice(0, 6);
+  const more = await Promise.all(pick.map(t => sv("reco.getreco", { pid: t.id }, "android").then(r => svList(Array.isArray(r) ? r : (r && r[t.id]) || [])).catch(() => [])));
+  for (let i = 0; i < 20; i++) add(more.map(l => l[i]));
+  const names = [...new Set([artist, ...out.slice(0, 6).map(t => t.artist)].map(a => String(a || "").split(",")[0].trim()).filter(Boolean))].slice(0, 3);
+  if (out.length < 60 && names.length) { const l = await Promise.all(names.slice(0, 2).map(n => svArtistTop(n).catch(() => []))); for (let i = 0; i < 60; i++) add(l.map(x => x[i])); }
+  return out.slice(0, 100);
+}
+async function svArtistTop(name) { // an artist's most played songs (2 pages), for radio
+  const k = "art:" + arNorm(name); const h = memGet(k); if (h) return h;
+  const l = await svArtists(name); const n = arNorm(name); const a = l.find(x => arNorm(x.name) === n) || l[0]; if (!a) return [];
+  const full = memGet("ar2:" + a.id); if (full) return full.items.slice(0, 80);
+  const pages = await Promise.all([0, 1].map(p => sv("artist.getArtistPageDetails", { artistId: a.id, page: String(p), category: "", sort_order: "", n_song: "50", n_album: "0" }, "android").catch(() => null)));
+  const raw = []; for (const r of pages) { const t = r && r.topSongs; for (const x of (Array.isArray(t) ? t : (t && t.songs)) || []) raw.push(x); }
+  const items = dedupeSongs(svList(raw), 80); memSet(k, items, 3 * 3600); return items;
 }
 async function svSuggest(q) {
   const j = await sv("autocomplete.get", { query: q });
@@ -1195,6 +1344,17 @@ export default {
       if (req.method === "OPTIONS" && p.startsWith("/api/import")) return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "86400" } });
       if (p === "/api/deals") { let o; try { o = await getDeals(env, ctx); } catch (e) { o = { channel: dealsChannel(env), join: "https://t.me/" + dealsChannel(env), items: [] }; } return J(o, 200, 300); }
       if (p === "/dhun.apk") { const r = await env.ASSETS.fetch(new Request(new URL("/files/dhun-app.apk", u), req)); const h = new Headers(r.headers); h.set("content-type", "application/vnd.android.package-archive"); h.set("content-disposition", 'attachment; filename="Dhun.apk"'); h.set("cache-control", "no-cache"); h.set("access-control-allow-origin", "*"); return new Response(r.body, { status: r.status, headers: h }); }
+      if (p === "/api/artists") { if (!q) return J({ items: [], albums: [] }); const [ar, al] = await Promise.all([svArtists(q).catch(() => []), svAlbumsSearch(q).catch(() => [])]); return J({ items: ar, albums: al }, 200, ar.length || al.length ? 3600 : 0); }
+      if (p === "/api/artist") { // ?id=<JioSaavn artist id> or ?name=<artist name> -> {id,name,image,followers,items:[up to 300 tracks]}
+        const nm = (u.searchParams.get("name") || "").slice(0, 120);
+        if (id && !/^\d{1,12}$/.test(id)) return J({ error: "bad id", items: [] }, 400);
+        if (!id && !nm) return J({ error: "id or name", items: [] }, 400);
+        try { const o = id ? await svArtist(id, ctx) : await svArtistByName(nm, ctx); return J(o, 200, o.items.length ? 3600 : 0); } catch (e) { return J({ id, name: "", items: [], error: "not found" }); }
+      }
+      if (p === "/api/album") { try { const o = await svAlbum(/^\d{1,15}$/.test(id) ? id : "", u.searchParams.get("song") || ""); return J(o, 200, o.items.length ? 3600 : 0); } catch (e) { return J({ id, name: "", items: [], error: "not found" }); } }
+      if (p === "/api/chart") { try { return J(await svChart(u.searchParams.get("l") || ""), 200, 1800); } catch (e) { return J({ items: [], error: "not found" }); } }
+      if (p === "/api/mood") { try { return J(await svMood(u.searchParams.get("m") || ""), 200, 3600); } catch (e) { return J({ items: [], error: "not found" }); } }
+      if (p === "/api/lyrics") { const sp = u.searchParams; try { const o = await getLyrics({ id, title: sp.get("title"), artist: sp.get("artist"), dur: sp.get("dur") }, ctx); return J(o, 200, o.plain || o.synced ? 86400 : 600); } catch (e) { return J({ synced: "", plain: "", source: "", error: 1 }); } }
       if (p === "/api/search") {
         if (!q) return J({ items: [] });
         const kind = u.searchParams.get("kind") || "songs";
@@ -1215,7 +1375,7 @@ export default {
       if (p === "/api/suggest") { try { return J({ items: await svSuggest(q) }, 200, 3600); } catch (e) { try { return J({ items: await suggest(q) }, 200, 3600); } catch (e2) { return J({ items: [] }); } } }
       if (p === "/api/radio") {
         const src = u.searchParams.get("src") || "";
-        if (src === "saavn" || !/^[\w-]{11}$/.test(v)) { try { return J({ items: await svRadio(v || id, u.searchParams.get("artist") || "", "", u.searchParams.get("title") || "") }, 200, 1800); } catch (e) { return J({ items: [], error: String(e) }); } }
+        if (src === "saavn" || !/^[\w-]{11}$/.test(v)) { try { return J({ items: await (u.searchParams.get("long") ? svRadioLong : svRadio)(v || id, u.searchParams.get("artist") || "", "", u.searchParams.get("title") || "") }, 200, 1800); } catch (e) { return J({ items: [], error: String(e) }); } }
         // legacy YouTube track: recommend from JioSaavn by artist
         try { return J({ items: await svRadio("", u.searchParams.get("artist") || q, "", u.searchParams.get("title") || "") }, 200, 1800); } catch (e) { return J({ items: [] }); }
       }

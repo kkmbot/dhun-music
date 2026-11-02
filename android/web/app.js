@@ -334,7 +334,9 @@ function openTrackSheet(t, ctx, idx) {
   showSheet(`<div class="sgroup"><div class="shead"><img src="${esc(small(t.thumb) || ytThumb(t.id))}"><div><div class="t1">${esc(t.title)}</div><div class="sub">${esc(t.artist)}</div></div></div>
     <button data-s="next">Play Next ${ICON.playNext}</button>
     <button data-s="last">Play Last ${ICON.queue}</button>
-    <button data-s="radio">Start Station ${ICON.note}</button>
+    <button data-s="radio">📻 Radio shuru karo ${ICON.note}</button>
+    ${t.artist && !isYT(t) ? `<button data-s="artist">Artist dekho: ${esc(String(t.artist).split(/,|&| x /).map(x => x.trim()).filter(Boolean).slice(0, 2).join(", "))} ${typeof PERSON_ICON === "string" ? PERSON_ICON : ""}</button>` : ""}
+    ${t.src === "saavn" ? `<button data-s="album">Album dekho${t.album ? ": " + esc(t.album) : ""} ${typeof DISC_ICON === "string" ? DISC_ICON : ""}</button>` : ""}
     <button data-s="like">${isLiked(t.id) ? "Unlike" : "Love"} ${isLiked(t.id) ? ICON.heart : ICON.heartO}</button>
     <button data-s="addpl">Add to Playlist… ${ICON.pl}</button>
     ${!NATIVE || isYT(t) ? "" : isOff(t.id) ? `<button data-s="unoff" class="danger">Remove from phone ${ICON.trash}</button>` : offJobs.has(t.id) ? `<button data-s="noop">Downloading to phone…<span data-offp="${esc(String(t.id))}">${offJobs.get(t.id) ? " " + offJobs.get(t.id) + "%" : ""}</span> ${ICON.dl}</button>` : `<button data-s="off">Download to phone (offline) ${ICON.dl}</button>`}
@@ -345,6 +347,8 @@ function openTrackSheet(t, ctx, idx) {
     next: () => { addToQueue(t, true); },
     last: () => { addToQueue(t, false); },
     radio: () => { startRadio(t); },
+    artist: () => { closeNP(); collOpenArtist(t.artist); },
+    album: () => { closeNP(); collOpen("als:" + t.id); },
     dl: () => download(t), undl: () => removeDl(t.id), noop: () => {}, off: () => offDownload(t), unoff: () => offRemove(t.id),
     like: () => toggleLike(t),
     addpl: () => { setTimeout(() => openAddToPlaylist(t), 50); },
@@ -801,10 +805,10 @@ function addToQueue(t, next) {
 }
 const radioURL = t => `/api/radio?src=${t.src === "saavn" ? "saavn" : ""}&v=${encodeURIComponent(t.src === "saavn" ? t.id : (resolved[t.id] && resolved[t.id].sid) || t.id)}&artist=${encodeURIComponent(t.artist || "")}&title=${encodeURIComponent(t.title || "")}`;
 async function startRadio(t) {
-  toast("Starting station…");
+  toast("📻 Radio shuru ho raha hai…");
   if (keepCur(t)) { queue = [queue[qi]]; qi = 0; autoplayAdded = new Set(); saveQ(); keepPlaying(); } // same song keeps playing from where it is
   else playList([t], 0);
-  try { const d = await api(radioURL(t)); const more = freshSongs(d.items, [t, queue[0]]); queue = [queue[0], ...more.map(slim)]; qi = 0; saveQ(); renderQueue(); prepNext(); } catch (e) {}
+  try { const d = await api(radioURL(t) + "&long=1"); const more = freshSongs(d.items, [t, queue[0]]); queue = [queue[0], ...more.map(slim)]; qi = 0; saveQ(); renderQueue(); prepNext(); } catch (e) {}
 }
 // Make sure the NEXT song already has a playable URL, so 'ended' can switch instantly (iOS freezes timers when locked)
 function prepNext() { const n = queue[qi + 1]; if (!n || isOff(n.id)) return; if (n.tg && isDl(n.id)) return; if (!urlOf(n) && !isYT(n) && navigator.onLine) resolveTrack(n); }
@@ -1845,9 +1849,9 @@ addToQueue = function (t, nx) {
 };
 startRadio = function (t) {
   if (!jamOn()) return rawStartRadio(t);
-  toast("Station shuru ho raha hai…");
+  toast("📻 Radio shuru ho raha hai…");
   const track = jamSlim(t), same = !!(jam.st && jam.st.song && jam.st.song.id === track.id && keepCur(track));
-  api(radioURL(t)).then(d => {
+  api(radioURL(t) + "&long=1").then(d => {
     const more = freshSongs(d.items, [t]).slice(0, 50).map(jamSlim);
     if (!jamOn()) return rawStartRadio(t);
     jamPredict(s => { if (same) { s.pos = jamExp(s); s.playing = true; } else { if (s.song) s.hist = (s.hist || []).concat([s.song]).slice(-30); s.song = track; s.pos = 0; s.playing = true; } s.queue = more; });
@@ -2004,4 +2008,257 @@ window.__jam = { get jam() { return jam; }, get off() { return jamOff; }, exp: (
 
 // storage: an update APK left in the app cache after installing is removed (it is ~5 MB and never needed again)
 if (NATIVE && FS) setTimeout(() => { try { if (!updState) FS.deleteFile({ path: "dhun-update.apk", directory: "CACHE" }).catch(() => {}); } catch (e) {} }, 20000);
+// ================= v21: Artist / Album / Charts / Mood pages ("Sab chalao"), Song radio, Sleep timer, Lyrics =================
+// ---------- collection pages: one view for an artist, an album, a chart or a mood mix: big "Sab chalao" (play all) + Shuffle ----------
+const colls = {}; // key -> {id,name,image,items,...} | {loading} | {error}
+const artistIds = {}; // artist name -> id (from the player's artist link)
+const arSearch = {}; // search text -> {items: artists, albums}
+const PERSON_ICON = '<svg viewBox="0 0 24 24"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.2-8 5v2h16v-2c0-2.8-3.6-5-8-5z"/></svg>';
+const DISC_ICON = '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 13.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7zm0-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>';
+const CHART_TILES = [["hindi", "Hindi", "#e0245e,#6b0f2f"], ["punjabi", "Punjabi", "#f0932b,#7a3b00"], ["english", "English", "#0984e3,#062f57"], ["bhojpuri", "Bhojpuri", "#00b894,#004d3d"], ["haryanvi", "Haryanvi", "#a55eea,#43206b"], ["trending", "Trending Today", "#fd9644,#8a2d00"]];
+const MOOD_TILES = [["romantic", "Romantic", "💕", "#e84393,#6d1440"], ["sad", "Sad", "💔", "#636e72,#1e2427"], ["party", "Party", "🎉", "#fdcb6e,#b35400"], ["gym", "Gym", "💪", "#d63031,#4d0b0b"], ["bhakti", "Bhakti", "🙏", "#e17055,#7a2a12"], ["lofi", "Lofi", "🌙", "#6c5ce7,#221a5c"]];
+function collURL(key) {
+  const i = key.indexOf(":"), k = key.slice(0, i), v = encodeURIComponent(key.slice(i + 1));
+  return { ar: "/api/artist?id=", arn: "/api/artist?name=", al: "/api/album?id=", als: "/api/album?song=", chart: "/api/chart?l=", mood: "/api/mood?m=" }[k] + v;
+}
+function collLoad(key) {
+  const c = colls[key]; if (c && (c.items || c.loading)) return c;
+  colls[key] = { loading: true };
+  api(collURL(key)).then(d => { colls[key] = d && d.items && d.items.length ? d : { error: 1 }; if (d && d.id && key.startsWith("arn:")) artistIds[key.slice(4)] = d.id; })
+    .catch(() => { colls[key] = { error: 1 }; })
+    .then(() => { if (subView === "c:" + key) rerender(); });
+  return colls[key];
+}
+function collOpen(key) {
+  if (key.startsWith("arn:")) { const id = artistIds[key.slice(4)]; if (id) { colls["ar:" + id] = colls["ar:" + id] || colls[key]; key = "ar:" + id; } }
+  collLoad(key); go(curTab === "home" ? "home" : "search", "c:" + key);
+}
+const artistNames = name => [...new Set(String(name || "").split(/,|&| x | feat\.? | ft\.? /i).map(x => x.trim()).filter(Boolean))].slice(0, 6);
+function collOpenArtist(name) { // one artist -> their page; a song with several -> pick one
+  const l = artistNames(name); if (!l.length) return;
+  if (l.length === 1) return collOpen("arn:" + l[0]);
+  setTimeout(() => showSheet(`<div class="sgroup"><div class="shead"><div><div class="t1">Kis artist ka page kholna hai?</div></div></div>${l.map((n, i) => `<button data-s="a" data-i="${i}">${esc(n)} ${PERSON_ICON}</button>`).join("")}</div>`, { a: b => { collOpen("arn:" + l[+b.dataset.i]); } }), 60);
+}
+function collTitle(key, c) {
+  const k = key.slice(0, key.indexOf(":")), v = key.slice(key.indexOf(":") + 1);
+  if (k === "mood") { const m = MOOD_TILES.find(x => x[0] === v); return m ? `${m[2]} ${m[1]} Mix` : "Mix"; }
+  if (k === "chart") { const ch = CHART_TILES.find(x => x[0] === v); return ch ? (v === "trending" ? "🔥 Trending Today" : `🔥 ${ch[1]} Top 50`) : (c && c.name) || "Top Charts"; }
+  return (c && c.name) || (k === "arn" ? v : "");
+}
+const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n);
+function renderColl(key) {
+  const k = key.slice(0, key.indexOf(":")), c = colls[key] || collLoad(key);
+  const round = k === "ar" || k === "arn";
+  const back = `<button class="back" data-act="back">${ICON.chev}${curTab === "home" ? "Listen Now" : searchState.q ? "Search" : "Back"}</button>`;
+  const title = collTitle(key, c);
+  let art;
+  if (k === "mood" || k === "chart") { const t = k === "mood" ? MOOD_TILES.find(x => x[0] === key.slice(5)) : CHART_TILES.find(x => x[0] === key.slice(6)); art = c && c.image && k === "chart" ? `<span class="cPic big"><img src="${esc(c.image)}" onerror="this.remove()"></span>` : `<span class="cPic big grad" style="background:linear-gradient(135deg,${t ? t[t.length - 1] : "#444,#111"})"><b>${t && k === "mood" ? t[2] : "🔥"}</b></span>`; }
+  else art = `<span class="${round ? "arPic" : "cPic"} big">${c && c.image ? `<img src="${esc(c.image)}" onerror="this.remove()">` : ""}${round ? PERSON_ICON : DISC_ICON}</span>`;
+  if (!c || c.loading) { view.innerHTML = `${back}<div class="arHero">${art}<h1>${esc(title)}</h1></div><div class="spin"></div>`; return; }
+  if (c.error || !c.items) { view.innerHTML = `${back}<div class="arHero">${art}<h1>${esc(title)}</h1></div><div class="empty">Gaane abhi nahi mil paaye 😕<br>Internet check karke dobara try karo.</div><div class="btnRow"><button data-act="collRetry">Dobara try karo</button></div>`; return; }
+  bindList("c:" + key, c.items);
+  const n = c.items.length;
+  const sub = k === "al" || k === "als" ? [c.artist, c.year, `${n} gaane`].filter(Boolean).join(" · ") : `${n} gaane${round && c.followers ? ` · ${fmtK(c.followers)} followers` : ""}`;
+  view.innerHTML = `${back}<div class="arHero">${art}<h1>${esc(title)}</h1><div class="sub">${esc(sub)}</div></div>
+  <div class="btnRow arBtns"><button data-act="collPlay" class="arAll">${ICON.play}Sab chalao</button><button data-act="collShuffle">${ICON.shuffle}Shuffle</button></div>
+  <div class="arList">${c.items.map((t, i) => rowHTML(t, i, "c:" + key)).join("")}</div>`;
+}
+function collPlayAll(c, mix, title) {
+  if (!c || !c.items || !c.items.length) return;
+  shuffle = !!mix; syncModes();
+  const list = mix ? shuffled(c.items) : c.items.slice();
+  if (jamOn()) { // Listen Together: everyone's queue becomes this list (the room keeps the next 100)
+    const track = jamSlim(list[0]), more = list.slice(1, 101).map(jamSlim);
+    jamPredict(s => { if (!s.song || s.song.id !== track.id) { if (s.song) s.hist = (s.hist || []).concat([s.song]).slice(-30); s.pos = 0; } s.song = track; s.playing = true; s.queue = more; });
+    jamAct({ t: "song", track, list: more, rq: 1 });
+  } else playList(list, 0);
+  toast(`${mix ? "🔀" : "▶️"} ${title ? title + ": " : ""}${list.length} gaane ${mix ? "shuffle me" : "chal rahe hain"}`);
+}
+function searchExtraHTML(x) {
+  let h = "";
+  if (x.items && x.items.length) h += `<h2 class="arH">Artists</h2><div class="car arCar">${x.items.map(a => `<button class="arTile" data-coll="ar:${esc(a.id)}"><span class="arPic">${a.image ? `<img loading="lazy" src="${esc(a.image)}" onerror="this.remove()">` : ""}${PERSON_ICON}</span><span class="t1">${esc(a.name)}</span></button>`).join("")}</div>`;
+  if (x.albums && x.albums.length) h += `<h2 class="arH">Albums</h2><div class="car arCar">${x.albums.map(a => `<button class="tile alTile" data-coll="al:${esc(a.id)}"><img loading="lazy" src="${esc(a.image)}" onerror="this.onerror=null;this.src='/icon-192.png'"><div class="t1">${esc(a.name)}</div><div class="t2">${esc([a.year, a.sub].filter(Boolean).join(" · "))}</div></button>`).join("")}</div>`;
+  if (h) h += `<h2 class="arH">Songs</h2>`;
+  return h;
+}
+function homeExtraHTML() {
+  return `<h2>🔥 Top Charts</h2><div class="car">${CHART_TILES.map(([l, n, g]) => `<button class="tile cTile" data-coll="chart:${l}"><span class="cArt" style="background:linear-gradient(135deg,${g})"><b>${esc(n)}</b><small>${l === "trending" ? "Aaj ke hits" : "Top 50"}</small></span><div class="t1">${esc(l === "trending" ? n : n + " Top 50")}</div></button>`).join("")}</div>
+  <h2>😊 Mood Mixes</h2><div class="car">${MOOD_TILES.map(([m, n, e, g]) => `<button class="tile cTile" data-coll="mood:${m}"><span class="cArt" style="background:linear-gradient(135deg,${g})"><i>${e}</i><b>${esc(n)}</b></span><div class="t1">${esc(n)} Mix</div></button>`).join("")}</div>`;
+}
+const rawRenderHomeV21 = renderHome;
+renderHome = function () {
+  if (subView && String(subView).startsWith("c:")) { const y = view.scrollTop; renderColl(subView.slice(2)); view.scrollTop = y; return; }
+  rawRenderHomeV21();
+  if (view.querySelector(".cTile")) return;
+  const tmp = document.createElement("div"); tmp.innerHTML = homeExtraHTML();
+  const shelf = [...view.querySelectorAll("h2")].find(h => h.querySelector("a[data-q]"));
+  if (shelf) shelf.before(...tmp.childNodes); else view.append(...tmp.childNodes);
+};
+const rawRenderSearchV21 = renderSearch;
+renderSearch = function () {
+  if (subView && String(subView).startsWith("c:")) { const y = view.scrollTop; renderColl(subView.slice(2)); view.scrollTop = y; return; }
+  rawRenderSearchV21();
+  const s = searchState, x = arSearch[s.q];
+  if (s.q && !s.typing && s.kind === "songs" && !s.loading && !s.error && x && ((x.items || []).length || (x.albums || []).length)) {
+    const sb = $("#sbody"), seg = sb && sb.querySelector(".seg"); if (!seg) return;
+    const tmp = document.createElement("div"); tmp.innerHTML = searchExtraHTML(x);
+    seg.after(...tmp.childNodes);
+  }
+};
+const rawDoSearchV21 = doSearch;
+doSearch = function (text, kind) {
+  const q = (text || "").trim();
+  if (q && (kind || searchState.kind) !== "videos" && !arSearch[q]) {
+    api("/api/artists?q=" + encodeURIComponent(q)).then(d => { arSearch[q] = { items: (d && d.items) || [], albums: (d && d.albums) || [] }; if (curTab === "search" && !subView && searchState.q === q && !searchState.loading) renderSearchBody(); }).catch(() => {});
+  }
+  return rawDoSearchV21(text, kind);
+};
+view.addEventListener("click", e => {
+  const t = e.target.closest("[data-coll]"); if (t) { e.preventDefault(); e.stopPropagation(); return collOpen(t.dataset.coll); }
+  const b = e.target.closest("[data-act]"); if (!b) return; const act = b.dataset.act;
+  if (act !== "collPlay" && act !== "collShuffle" && act !== "collRetry") return;
+  e.preventDefault(); e.stopPropagation();
+  const key = subView && String(subView).startsWith("c:") ? subView.slice(2) : ""; if (!key) return;
+  if (act === "collRetry") { delete colls[key]; collLoad(key); return rerender(); }
+  collPlayAll(colls[key], act === "collShuffle", collTitle(key, colls[key]));
+}, true);
+{ // player: tap the artist name -> their page
+  const el = $("#npArtist");
+  if (el) { el.classList.add("arLink"); el.setAttribute("role", "link"); el.addEventListener("click", e => { e.stopPropagation(); const t = queue[qi]; if (!t || !t.artist) return; closeNP(); collOpenArtist(t.artist); }); }
+}
+
+// ---------- 😴 Sleep timer: 15/30/45/60 min or "gaana khatam hone pe"; fades out, then pauses. Timestamps, so a locked phone catches up on the next tick ----------
+let sleep = null; // {at, min} | {end: songId}
+let sleepFade = 0; const SLEEP_FADE = 8000;
+const sleepLeft = () => !sleep ? 0 : sleep.at ? Math.max(0, sleep.at - Date.now()) : Math.max(0, ((P.dur() || 0) - (P.time() || 0)) * 1000);
+const fmtLeft = ms => { const s = Math.ceil(ms / 1000), m = Math.floor(s / 60); return m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}` : `${m}:${String(s % 60).padStart(2, "0")}`; };
+function sleepLabel() { if (!sleep) return "Off"; return sleep.end ? "Gaana khatam hone pe" : `${fmtLeft(sleepLeft())} baaki`; }
+function sleepSet(v) {
+  sleepFade = 0; try { audio.volume = 1; } catch (e) {}
+  if (v === "end") { const t = queue[qi]; if (!t) { toast("Pehle koi gaana chalao"); return; } sleep = { end: t.id }; toast("😴 Ye gaana khatam hote hi music band"); }
+  else { sleep = { at: Date.now() + v * 60e3, min: v }; toast(`😴 Sleep timer: ${v} min`); }
+  sleepUI();
+}
+function sleepCancel(quiet) { const had = !!sleep; sleep = null; if (sleepFade) { sleepFade = 0; try { audio.volume = 1; } catch (e) {} } sleepUI(); if (had && !quiet) toast("Sleep timer band"); }
+function sleepStop() { // time's up
+  sleep = null; sleepFade = 0;
+  if (jamOn()) { jamLeave(true); toast("😴 Sleep timer: Listen Together se nikal ke music band kiya"); } else toast("😴 Sleep timer: music band. Good night!");
+  P.pause(); setTimeout(() => { try { audio.volume = 1; } catch (e) {} }, 300);
+  sleepUI();
+}
+function sleepTick() {
+  if (!sleep) return;
+  if (sleep.at) {
+    const now = Date.now();
+    if (!P.playing() && now >= sleep.at) { sleepCancel(true); return; } // already paused when the time came
+    if (now >= sleep.at - SLEEP_FADE && P.playing()) {
+      if (mode !== "audio" || !mixVolOK) { if (now >= sleep.at) sleepStop(); }
+      else { if (!sleepFade) { sleepFade = now; mixAbort(); } const k = Math.min(1, (now - sleepFade) / SLEEP_FADE); try { audio.volume = Math.max(0, 1 - k); } catch (e) {} if (k >= 1 || now >= sleep.at + 1000) sleepStop(); }
+    }
+  }
+  sleepUIText();
+}
+function sleepUIText() {
+  const b = $("#npSleep"); if (b) { const sp = b.querySelector("small"); const txt = !sleep ? "" : sleep.end ? "♪" : String(Math.ceil(sleepLeft() / 60e3)); if (sp && sp.textContent !== txt) sp.textContent = txt; }
+  document.querySelectorAll("[data-sleepleft]").forEach(el => { const t = sleepLabel(); if (el.textContent !== t) el.textContent = t; });
+}
+function sleepUI() { const b = $("#npSleep"); if (b) b.classList.toggle("on", !!sleep); sleepUIText(); }
+function sleepSheet() {
+  showSheet(`<div class="sgroup"><div class="shead"><div><div class="t1">😴 Sleep timer</div><div class="sub" data-sleepleft>${esc(sleepLabel())}</div></div></div>
+    ${[15, 30, 45, 60].map(m => `<button data-s="m" data-m="${m}">${m} minute${sleep && sleep.min === m ? " ✓" : ""}</button>`).join("")}
+    <button data-s="end">Gaana khatam hone pe${sleep && sleep.end ? " ✓" : ""}</button>
+    ${sleep ? `<button data-s="off" class="danger">Timer band karo</button>` : ""}</div>`, {
+    m: b => sleepSet(+b.dataset.m), end: () => sleepSet("end"), off: () => sleepCancel(),
+  });
+}
+const rawMixNextIndexV21 = mixNextIndex;
+mixNextIndex = function () { if (sleep && (sleep.end || (sleep.at && sleep.at - Date.now() < 45e3))) return -1; return rawMixNextIndexV21(); }; // no AutoMix into a song that the timer would stop
+const rawNextV21 = next;
+next = function (auto) {
+  if (auto && sleep && sleep.end) { sleep = null; sleepUI(); if (jamOn()) jamLeave(true); P.pause(); toast("😴 Gaana khatam — music band. Good night!"); return; }
+  return rawNextV21(auto);
+};
+// ---------- 🎤 Lyrics: synced (karaoke highlight + auto-scroll) from lrclib, else plain text ----------
+const lyrCache = new Map(); // track id -> {synced:[{t,x}], plain, none} | {loading}
+let lyrOpenNow = false, lyrFor = "", lyrCur = -1, lyrUserScroll = 0;
+const MIC_ICON = '<svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11z"/></svg>';
+const MOON_ICON = '<svg viewBox="0 0 24 24"><path d="M12.3 2a9.5 9.5 0 1 0 9.7 11.6A7.5 7.5 0 0 1 12.3 2z"/></svg>';
+function parseLRC(s) {
+  const out = [];
+  for (const line of String(s || "").split(/\r?\n/)) { const tags = [...line.matchAll(/\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g)]; if (!tags.length) continue; const x = line.replace(/\[[^\]]*\]/g, "").trim(); for (const m of tags) out.push({ t: +m[1] * 60 + parseFloat(m[2].replace(":", ".")), x }); }
+  return out.sort((a, b) => a.t - b.t);
+}
+function lyrLoad(t) {
+  if (!t) return;
+  lyrFor = t.id; lyrCur = -1;
+  const c = lyrCache.get(t.id); if (c && !c.err) { lyrRender(); return; }
+  lyrCache.set(t.id, { loading: 1 }); lyrRender();
+  const q = `/api/lyrics?id=${encodeURIComponent(t.src === "saavn" ? t.id : "")}&title=${encodeURIComponent(t.title || "")}&artist=${encodeURIComponent(t.artist || "")}&dur=${Math.round(t.dur || P.dur() || 0)}`;
+  api(q).then(d => { const syn = parseLRC(d && d.synced); lyrCache.set(t.id, syn.length > 2 ? { synced: syn, plain: d.plain || "" } : d && d.plain ? { plain: String(d.plain) } : { none: 1, err: d && d.error ? 1 : 0 }); })
+    .catch(() => lyrCache.set(t.id, { none: 1, err: 1 }))
+    .then(() => { if (lyrFor === t.id) lyrRender(); });
+}
+function lyrRender() {
+  const p = $("#lyrPanel"); if (!p) return;
+  const t = queue[qi], c = lyrCache.get(lyrFor) || {};
+  const head = `<div class="qHead"><b>Lyrics</b><span>${esc((t && t.title) || "")}</span></div>`;
+  if (c.loading) p.innerHTML = head + `<div class="spin"></div>`;
+  else if (c.synced) p.innerHTML = head + `<div class="lyrBody synced">${c.synced.map((l, i) => `<p data-li="${i}"${l.x ? "" : ' class="gap"'}>${l.x ? esc(l.x) : "♪"}</p>`).join("")}</div>`;
+  else if (c.plain) p.innerHTML = head + `<div class="lyrBody plain">${esc(c.plain).replace(/\n/g, "<br>")}</div>`;
+  else p.innerHTML = head + `<div class="lyrNone">Lyrics nahi mile 😕${c.err ? `<br><button class="lyrRetry" data-lyr="retry">Dobara try karo</button>` : ""}</div>`;
+  lyrCur = -1; lyrTick(true);
+}
+function lyrTick(force) {
+  if (!lyrOpenNow) return;
+  const c = lyrCache.get(lyrFor); if (!c || !c.synced) return;
+  const tm = (P.time() || 0) + 0.25; let i = -1;
+  for (let j = 0; j < c.synced.length; j++) { if (c.synced[j].t <= tm) i = j; else break; }
+  if (i === lyrCur && !force) return;
+  const p = $("#lyrPanel"); if (!p) return;
+  const old = p.querySelector("p.cur"); if (old) old.classList.remove("cur");
+  lyrCur = i; const el = i >= 0 ? p.querySelector(`p[data-li="${i}"]`) : null;
+  if (el) { el.classList.add("cur"); if (Date.now() - lyrUserScroll > 3500) p.scrollTo({ top: Math.max(0, el.offsetTop - p.clientHeight / 2 + el.clientHeight / 2), behavior: force ? "auto" : "smooth" }); }
+}
+function lyrToggle(open) {
+  lyrOpenNow = open === undefined ? !lyrOpenNow : !!open;
+  const p = $("#lyrPanel"), b = $("#npLyr"); if (!p) return;
+  p.classList.toggle("hidden", !lyrOpenNow); if (b) b.classList.toggle("on", lyrOpenNow); np.classList.toggle("lopen", lyrOpenNow);
+  if (lyrOpenNow) {
+    if (!$("#queuePanel").classList.contains("hidden")) { $("#queuePanel").classList.add("hidden"); $("#npQueueBtn").classList.remove("on"); np.classList.remove("qopen"); }
+    const t = queue[qi]; if (t) lyrLoad(t); else p.innerHTML = `<div class="lyrNone">Pehle koi gaana chalao</div>`;
+  }
+}
+{ // now-playing: 🎤 Lyrics + 😴 Sleep buttons, lyrics panel
+  const nb = document.querySelector("#np .npBottom"), qp = $("#queuePanel");
+  if (nb && qp && !$("#npLyr")) {
+    const lb = document.createElement("button"); lb.id = "npLyr"; lb.className = "icon small"; lb.setAttribute("aria-label", "Lyrics"); lb.innerHTML = MIC_ICON;
+    const sb = document.createElement("button"); sb.id = "npSleep"; sb.className = "icon small"; sb.setAttribute("aria-label", "Sleep timer"); sb.innerHTML = MOON_ICON + "<small></small>";
+    const qb = $("#npQueueBtn"); nb.insertBefore(lb, qb); nb.appendChild(sb);
+    lb.onclick = () => lyrToggle(); sb.onclick = () => sleepSheet();
+    const lp = document.createElement("div"); lp.id = "lyrPanel"; lp.className = "hidden"; qp.after(lp);
+    ["touchstart", "touchmove", "touchend"].forEach(ev => lp.addEventListener(ev, e => { e.stopPropagation(); if (ev !== "touchend") lyrUserScroll = Date.now(); }, { passive: true }));
+    lp.addEventListener("wheel", () => { lyrUserScroll = Date.now(); }, { passive: true });
+    lp.addEventListener("click", e => { const r = e.target.closest("[data-lyr=retry]"); if (r) { const t = queue[qi]; if (t) { lyrCache.delete(t.id); lyrLoad(t); } return; } const l = e.target.closest("p[data-li]"); const c = lyrCache.get(lyrFor); if (l && c && c.synced) { const x = c.synced[+l.dataset.li]; if (x) { lyrUserScroll = 0; P.seek(x.t); } } });
+    if (qb) { const oq = qb.onclick; qb.onclick = function (e) { if (lyrOpenNow) lyrToggle(false); return oq && oq.call(this, e); }; }
+  }
+}
+const rawUpdateMetaV21 = updateMeta;
+updateMeta = function (t) { rawUpdateMetaV21(t); if (lyrOpenNow && t && t.id !== lyrFor) lyrLoad(t); };
+// one clock for the timer + lyrics: every 'timeupdate' of whichever <audio> is playing (AutoMix swaps them), and once a second
+const v21Wired = new WeakSet();
+function v21Tick() { if (!v21Wired.has(audio)) { v21Wired.add(audio); audio.addEventListener("timeupdate", v21Tick); } sleepTick(); lyrTick(); }
+setInterval(v21Tick, 1000); v21Tick();
+document.addEventListener("visibilitychange", v21Tick);
+// Settings: Sleep timer row
+const rawRenderLibraryV21 = renderLibrary;
+renderLibrary = function () {
+  rawRenderLibraryV21();
+  if (subView !== "settings" || view.querySelector("[data-act=sleepSet]")) return;
+  const card = [...view.querySelectorAll(".setCard")].find(c => c.querySelector("[data-act=automix]"));
+  const tmp = document.createElement("div"); tmp.innerHTML = `<div class="setCard"><button class="setRow" data-act="sleepSet"><span><b>😴 Sleep timer</b><small data-sleepleft>${esc(sleepLabel())}</small></span><i class="chevR">${ICON.chev}</i></button></div>`;
+  const hd = card && card.previousElementSibling && /^H[1-3]$/.test(card.previousElementSibling.tagName) ? card.previousElementSibling : card;
+  if (hd) hd.before(tmp.firstChild); else view.append(tmp.firstChild);
+};
+view.addEventListener("click", e => { const b = e.target.closest("[data-act=sleepSet]"); if (b) { e.preventDefault(); e.stopPropagation(); sleepSheet(); } }, true);
+window.__v21 = { colls, arSearch, collOpen, get sleep() { return sleep; }, sleepSet, sleepCancel, get lyr() { return { open: lyrOpenNow, id: lyrFor, cur: lyrCur, data: lyrCache.get(lyrFor) }; }, lyrToggle };
 })();
