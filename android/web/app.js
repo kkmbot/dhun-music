@@ -4034,4 +4034,21 @@ view.addEventListener("click", e => {
 
 window.__v25 = { _ctx: () => actx, _play: url => playUrl(queue[qi], url, loadToken, true, 0, 0), menu: v25Menu, corsOK: v25CorsOK, bypass: v25Bypass, home: v25Home, podRec: v25PodRec, hist: v25HistShow, st: () => ({ eqOn, eqRouted, ctx: actx && actx.state, noEq: v25NoEqId, sil: v25Sil, src: audio && audio.getAttribute("src"), co: audio && audio.crossOrigin }) };
 
+// ---------- v26: header variant D (approved by owner) — no title line; tiny "DHUN · BY GURU" caption inside the greeting card ----------
+function hdrD(view) {
+  if (curTab !== "home" || subView) return;
+  const h1 = view.querySelector(":scope > h1.hrow.v25pbh");
+  if (h1) { if (h1.textContent !== "Dhun") h1.textContent = "Dhun"; if (h1.getAttribute("aria-label") !== "Dhun") h1.setAttribute("aria-label", "Dhun"); } // 0-height anchor so the compact top bar reads "Dhun" when scrolled
+  const g = view.querySelector("[data-greet]"); if (!g || g.querySelector(".hdrCap")) return;
+  g.insertAdjacentHTML("afterbegin", '<span class="hdrCap" data-notr>Dhun · by <em>Guru</em></span>');
+}
+// greetPaint() only rewrites <b> and <small>, so the caption survives repaints.
+const renderHomeHdrD = renderHome;
+renderHome = function () { const r = renderHomeHdrD.apply(this, arguments); try { hdrD(view); } catch (e) {} return r; };
+new MutationObserver(() => { if (curTab === "home" && !subView) try { hdrD(view); } catch (e) {} }).observe(view, { childList: true });
+try { hdrD(view); } catch (e) {}
+// v26: repaint the greeting once Telegram answers, so the real first name shows without waiting for the next Home render
+if (typeof tgRefresh === "function") { const tgRefreshV26 = tgRefresh; tgRefresh = async function () { const r = await tgRefreshV26.apply(this, arguments); try { greetPaint(); } catch (e) {} return r; }; }
+window.__v26 = { hdr: () => hdrD(view) };
+
 })();

@@ -875,3 +875,11 @@ html.rt #view .brandBar.v25bb .gear{background:#2c2c2e;-webkit-backdrop-filter:n
 .v25hr button[data-v25h=go] svg{width:18px;height:18px;fill:rgba(255,255,255,.5);flex:none}
 .v25hr button[data-v25h=go] span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .v25hx{flex:none;width:44px;height:44px;color:rgba(255,255,255,.45);font-size:15px}
+
+/* Variant D — no title; tiny "DHUN · BY GURU" caption inside the greeting card */
+#view h1.hrow.v25pbh{height:0!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;visibility:hidden!important;border:0!important}
+#view .brandBar.v25bb{min-height:56px;padding-bottom:8px}
+#view .brandBar.v25bb img{height:40px}
+.greet .hdrCap{position:relative;display:flex;align-items:center;gap:6px;margin:-2px 0 8px;font-size:10.5px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:rgba(255,255,255,.5)}
+.greet .hdrCap::before{content:"";width:6px;height:6px;border-radius:50%;background:#fa2d48;box-shadow:0 0 8px #fa2d48}
+.greet .hdrCap em{font-style:normal;font-weight:800;color:#ff8ea0}
