@@ -247,7 +247,7 @@ function renderSettings() {
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button><a class="dealRow" href="${esc(deals.join || DEALS_JOIN_DEFAULT)}" target="_blank" rel="noopener"><i class="dealEmoji">🛍️</i><span>Join Deals channel <small class="sub">Daily deals</small></span></a></div>
-  ${footHTML()}<div class="verTag">v1.0.4 · web</div>`;
+  ${footHTML()}<div class="verTag">v1.0.5 · web</div>`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -3120,7 +3120,7 @@ renderLibrary = function () {
   const h = `<h2>🌐 Language</h2><div class="setCard langCard"><div class="setLbl">App ki bhasha</div><div class="seg langSeg" data-notr>${LANGS.map(([k, n]) => `<button data-act="lang" data-l="${k}" class="${appLang === k ? "on" : ""}">${esc(n)}</button>`).join("")}</div></div>`;
   if (first) first.insertAdjacentHTML("beforebegin", h); else view.insertAdjacentHTML("beforeend", h);
   const am = view.querySelector("[data-act=automix]");
-  if (am && mixVolOK && !view.querySelector(".mixNote2")) am.insertAdjacentHTML("afterend", `<div class="setNote mixNote2">${appLang === "hi" ? "नया: बीट पर मिक्स, अगले गाने की ख़ामोशी छोड़ी जाती है, और जाते गाने का बेस धीरे-धीरे हटता है (DJ जैसा)। EQ / बेस बूस्ट चालू हो तो ऑटोमिक्स बंद रहता है।" : appLang === "en" ? "New: blends start on the beat, the next song's silence is skipped and the outgoing song's bass sweeps out (DJ-style). AutoMix pauses while EQ / Bass Boost is on." : "Naya: beat pe mix, agle gaane ki khamoshi skip, aur jaate gaane ka bass dheere-dheere hat-ta hai (DJ jaisa). EQ / Bass Boost on ho to AutoMix band rehta hai."}</div>`);
+  if (am && mixVolOK && !view.querySelector(".mixNote2")) am.insertAdjacentHTML("afterend", `<div class="setNote mixNote2">${appLang === "hi" ? "नया: दोनों गानों की स्पीड (BPM) मिलाई जाती है, मिक्स बीट और फ़्रेज़ पर शुरू होता है, ख़ामोशी छोड़ी जाती है, आवाज़ बराबर रहती है और जाते गाने का बेस धीरे-धीरे हटता है (DJ जैसा)। EQ / बेस बूस्ट चालू हो तो ऑटोमिक्स बंद रहता है।" : appLang === "en" ? "New: both songs' tempo (BPM) is matched, blends start on the beat and phrase, silences are skipped, volume stays even and the outgoing song's bass sweeps out (DJ-style). AutoMix pauses while EQ / Bass Boost is on." : "Naya: dono gaano ki speed (BPM) match, beat aur phrase pe mix, khamoshi skip, awaaz barabar, aur jaate gaane ka bass dheere-dheere hat-ta hai (DJ jaisa). EQ / Bass Boost on ho to AutoMix band rehta hai."}</div>`);
   return r;
 };
 view.addEventListener("click", e => { const b = e.target.closest("[data-act=lang]"); if (!b) return; e.preventDefault(); e.stopPropagation(); setLang(b.dataset.l); toast(tr("Bhasha badal di ✅")); }, true);
@@ -3994,5 +3994,209 @@ function mvBuild(t) {
     gs.slice(1).forEach(g => { const s = document.createElement("div"); s.className = "mvSep"; L.appendChild(s); while (g.firstChild) L.appendChild(g.firstChild); g.remove(); });
   }
 }
+
+// ================= v29: AutoMix 3 — tempo match · phrase mix points · loudness match (Apple Music style) =================
+// Same code path as AutoMix 2 (mixAnalyse → mixPlan → mixMaybe → mixStart → mixCommit), wrapped, nothing parallel.
+// Per song, from the same cheap 48 kbps copy decoded at 8 kHz (direct CDN fetch, else the /api/p pass-through), cached per song id
+// in localStorage (m_mixA3): tempo refined over the whole song (comb search ±1.5% around the autocorrelation peak), a local beat
+// grid at the start (bH = first beat) and near the end (bE), and the gated loudness of the song body (dB).
+// Transition: starts on a phrase boundary (16, else 8 beats counted from the first beat) near where the outro starts; both songs
+// meet at the middle tempo (half/double time handled; skipped when they are more than 6% apart) via playbackRate with
+// preservesPitch; the incoming song is phase-locked to the outgoing beat during the overlap; the louder side is turned down to the
+// quieter one (≤ 6 dB); afterwards the new song glides back to its own tempo (≤ 0.4%/s) and full volume.
+// HTMLAudio playbackRate/volume only: no new Web Audio routing, so background / lock-screen playback is untouched.
+// No analysis (CORS / data saver / non-JioSaavn file) → AutoMix 2 exactly as before.
+const MX3_KEY = "mixA3", MX3_MAX = 400, MX3_GAP = 0.06;
+const mx3Api = typeof API_BASE === "string" ? API_BASE : "";
+let mx3Cache = store.get(MX3_KEY, {}); if (!mx3Cache || typeof mx3Cache !== "object" || Array.isArray(mx3Cache)) mx3Cache = {};
+const MX3_FIELDS = ["head", "first", "end", "outro", "dur", "bpm", "per", "phase", "conf", "loud", "bE", "bH", "pulse", "src"];
+function mx3Save(id, v) {
+  try {
+    const k = {}; for (const f of MX3_FIELDS) if (v[f] !== undefined) k[f] = typeof v[f] === "number" ? Math.round(v[f] * 1e4) / 1e4 : v[f];
+    k.v3 = 1; k.ts = Date.now(); mx3Cache[id] = k;
+    const ks = Object.keys(mx3Cache);
+    if (ks.length > MX3_MAX) { ks.sort((a, b) => (mx3Cache[a].ts || 0) - (mx3Cache[b].ts || 0)); for (const x of ks.slice(0, ks.length - MX3_MAX)) delete mx3Cache[x]; }
+    store.set(MX3_KEY, mx3Cache);
+  } catch (e) {}
+}
+function mx3Extra(buf, v) { // adds loud, refined bpm/per, bH (first beat), bE (a beat near the end), pulse (beat clarity)
+  if (!v) return v;
+  const sr = buf.sampleRate, L0 = buf.length, nc = buf.numberOfChannels;
+  const x = new Float32Array(L0); for (let c = 0; c < nc; c++) { const ch = buf.getChannelData(c); for (let i = 0; i < L0; i++) x[i] += ch[i] / nc; }
+  // gated loudness: 400 ms blocks, absolute gate −60 dB, relative gate −10 dB (like LUFS, without K-weighting)
+  const bw = Math.max(1, Math.round(sr * 0.4)), pw = [];
+  for (let i = 0; i + bw <= L0; i += bw) { let s = 0; for (let k = i, e = i + bw; k < e; k++) s += x[k] * x[k]; pw.push(s / bw); }
+  const g1 = pw.filter(p => p > 1e-6); if (g1.length) { const m1 = g1.reduce((a, b) => a + b, 0) / g1.length, g2 = g1.filter(p => p > m1 * 0.1); const m2 = (g2.length ? g2 : g1).reduce((a, b) => a + b, 0) / (g2.length || g1.length); v.loud = Math.round(10 * Math.log10(m2 + 1e-12) * 10) / 10; }
+  if (!v.per) return v;
+  const hop = 128, m = Math.floor(L0 / hop), env = new Float32Array(m), fl = new Float32Array(m + 2);
+  for (let k = 1; k < m; k++) { let s = 0; for (let i = k * hop, z = i + hop; i < z; i++) { const d = x[i] - x[i - 1]; s += d * d; } env[k] = Math.log(1e-9 + s); }
+  for (let k = 2; k < m; k++) { const d = env[k] - env[k - 1]; fl[k] = d > 0 ? d : 0; }
+  const fps = sr / hop;
+  const comb = (p, a, b) => { let best = -1, bp = 0, tot = 0; const steps = 32; for (let s = 0; s < steps; s++) { const ph = s * p / steps; let sc = 0, n = 0; for (let k = a + ph; k < b - 1; k += p) { const i = k | 0, f = k - i; sc += fl[i] * (1 - f) + fl[i + 1] * f; n++; } sc /= n || 1; tot += sc; if (sc > best) { best = sc; bp = ph; } } return { best, ph: bp, mean: tot / steps }; };
+  const h0 = Math.max(1, Math.floor(v.head * fps)), e0 = Math.min(m - 2, Math.floor(v.end * fps));
+  const a = Math.max(h0, Math.floor(m * 0.05)), b = Math.min(e0, Math.floor(m * 0.95)); if (b - a < fps * 30) return v;
+  const p0 = v.per * fps; let bp = p0, bs = -1, bmean = 1;
+  for (let i = -60; i <= 60; i++) { const p = p0 * (1 + i * 0.00025), r = comb(p, a, b); if (r.best > bs) { bs = r.best; bp = p; bmean = r.mean; } }
+  v.pulse = Math.round(bs / (bmean || 1) * 100) / 100;
+  v.per = bp / fps; v.bpm = Math.round(60 / v.per * 100) / 100;
+  const hw = comb(bp, h0, Math.min(e0, h0 + Math.floor(fps * 30))), g0 = (h0 + hw.ph) / fps;
+  let bH = g0 + Math.round(((v.first || v.head) - g0) / v.per) * v.per; if (bH < v.head - 0.05) bH += v.per;
+  const ea = Math.max(h0, e0 - Math.floor(fps * 45)), ew = comb(bp, ea, Math.max(ea + 2, e0 - Math.floor(fps * 1)));
+  v.bH = Math.max(0, bH); v.bE = (ea + ew.ph) / fps; v.first = Math.min(v.bH, 9); v.phase = v.bE % v.per;
+  return v;
+}
+mixAnalyse = function (t) {
+  if (!t || !mixOn()) return null;
+  if (mixInfo.has(t.id)) return mixInfo.get(t.id);
+  const trim = () => { if (mixInfo.size > 40) mixInfo.delete(mixInfo.keys().next().value); };
+  const c = mx3Cache[t.id];
+  if (c && c.v3) { const box = { v: Object.assign({ cached: 1 }, c) }; mixInfo.set(t.id, box); trim(); return box; }
+  const box = { v: undefined }; mixInfo.set(t.id, box); trim();
+  const src = mixAnaSrc(t); if (!src) { box.v = null; return box; }
+  (async () => {
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext; if (!OAC) return null;
+    let ab = null, how = /^https?:/.test(src) ? "cdn" : "file";
+    try { const r = await fetch(src); if (r.ok) ab = await r.arrayBuffer(); } catch (e) {}
+    if (!ab && /^https:\/\/[^/]*saavncdn\.com\//.test(src)) { try { const r = await fetch(mx3Api + "/api/p?u=" + encodeURIComponent(src)); if (r.ok) { ab = await r.arrayBuffer(); how = "proxy"; } } catch (e) {} } // CDN without CORS: same-origin pass-through
+    if (!ab) return null;
+    const ctx = new OAC(1, 1, 8000);
+    const buf = await new Promise((res, rej) => { const p = ctx.decodeAudioData(ab, res, rej); if (p && p.then) p.then(res, rej); });
+    const v = mixAnaBuf(buf); if (!v) return null;
+    try { mx3Extra(buf, v); } catch (e) {}
+    v.src = how; return v;
+  })().then(v => { box.v = v || null; if (v) mx3Save(t.id, v); }, () => { box.v = null; });
+  return box;
+};
+const mixPlanV28 = mixPlan;
+mixPlan = function (info, d) { // phrase-aligned start near where the outro begins
+  if (!info || !info.per || info.bE == null || info.bH == null || !(info.pulse >= 1.1)) { const p = mixPlanV28(info, d); p.why = "v2"; return p; }
+  const end = Math.min(d, info.end), per = info.per;
+  let want;
+  if (info.outro >= 4) want = Math.max(5, Math.min(12, info.outro * 0.8 + 1)); // blend over the song's own fade
+  else { want = per * 16; while (want > 11) want /= 2; while (want < 5) want *= 2; } // hard ending: about 4 bars
+  const desired = end - want, lo = end - 14, hi = end - 4;
+  let at = -1, phrase = 0, cost = 1e9; // a 16-beat phrase if one is near, else 8 beats, else a bar (4), else the nearest beat
+  const m0 = Math.ceil((lo - info.bE) / per), m1 = Math.floor((hi - info.bE) / per);
+  for (let k = m0; k <= m1; k++) {
+    const tb = info.bE + k * per, n = Math.round((tb - info.bH) / per), P = n % 16 === 0 ? 16 : n % 8 === 0 ? 8 : n % 4 === 0 ? 4 : 1;
+    const c = Math.abs(tb - desired) + (P === 16 ? 0 : P === 8 ? 0.8 : P === 4 ? 2 : 4);
+    if (c < cost) { cost = c; at = tb; phrase = P; }
+  }
+  if (at < 0) { at = info.bE + Math.round((desired - info.bE) / per) * per; phrase = 1; }
+  at = Math.max(0, Math.min(at, end - 2));
+  return { at, L: Math.max(2, Math.min(14, end - at)), end, phrase, why: phrase >= 8 ? "phrase" + phrase : phrase === 4 ? "bar" : "beat" };
+};
+function mx3Tempo(a, b) { // outgoing a, incoming b → rates that make both meet at the middle tempo
+  if (!a || !b || !a.bpm || !b.bpm || !a.per || !b.per || a.bH == null || b.bH == null) return { skip: "no tempo" };
+  if (!(a.pulse >= 1.6 && b.pulse >= 1.6)) return { skip: "weak beat (pulse " + a.pulse + " / " + b.pulse + ")" }; // old / live-played songs drift: no tempo change
+  let best = null; for (const mul of [0.5, 1, 2]) { const r = a.bpm / (b.bpm * mul); if (!best || Math.abs(Math.log(r)) < Math.abs(Math.log(best.r))) best = { r, mul }; }
+  const gap = Math.abs(best.r - 1);
+  if (gap > MX3_GAP) return { skip: "tempo gap " + (gap * 100).toFixed(1) + "%", gap, mul: best.mul };
+  if (gap < 0.002) return { ro: 1, ri: 1, gap, mul: best.mul, T: a.bpm };
+  const T = Math.sqrt(a.bpm * b.bpm * best.mul);
+  return { ro: T / a.bpm, ri: T / (b.bpm * best.mul), gap, mul: best.mul, T: Math.round(T * 100) / 100 };
+}
+function mx3Gains(a, b) { // + db = incoming louder; the louder side is turned down, never up (HTMLAudio volume ≤ 1)
+  if (!a || !b || !(a.loud > -70) || !(b.loud > -70)) return { o: 1, i: 1, db: 0 };
+  const db = Math.max(-6, Math.min(6, b.loud - a.loud));
+  if (Math.abs(db) < 1) return { o: 1, i: 1, db: Math.round(db * 10) / 10 };
+  return db > 0 ? { o: 1, i: Math.pow(10, -db / 20), db: Math.round(db * 10) / 10 } : { o: Math.pow(10, db / 20), i: 1, db: Math.round(db * 10) / 10 };
+}
+// rate / volume glides (100 ms ticks, timestamp-driven so throttled timers still land on the target)
+const mx3Ramps = new Set(); let mx3Iv = 0, mx3 = null;
+function mx3Base() { const r = typeof rateWant === "function" ? rateWant() : 1; return r == null ? 1 : r; }
+function mx3SetTm(el, tm, exact) { if (!el) return; el._tm = tm; try { el.preservesPitch = true; el.mozPreservesPitch = true; el.webkitPreservesPitch = true; const r = mx3Base() * tm; if (Math.abs(el.playbackRate - r) > (exact ? 0 : 0.0004)) el.playbackRate = r; } catch (e) {} }
+function mx3Tick() {
+  const now = performance.now();
+  for (const r of [...mx3Ramps]) { const x = Math.min(1, (now - r.t0) / r.ms), e = x * x * (3 - 2 * x), v = r.from + (r.to - r.from) * e; if (r.kind === "tm") mx3SetTm(r.el, v, x >= 1); else { try { r.el.volume = Math.max(0, Math.min(1, v)); } catch (er) {} } if (x >= 1) mx3Ramps.delete(r); }
+  if (mx3Ramps.size && !mx3Iv) mx3Iv = setInterval(mx3Tick, 100); else if (!mx3Ramps.size && mx3Iv) { clearInterval(mx3Iv); mx3Iv = 0; }
+}
+function mx3Ramp(el, kind, to, ms) {
+  for (const r of [...mx3Ramps]) if (r.el === el && r.kind === kind) mx3Ramps.delete(r);
+  mx3Ramps.add({ el, kind, from: kind === "tm" ? (el._tm || 1) : el.volume, to, t0: performance.now(), ms: Math.max(1, ms) }); mx3Tick();
+}
+function mx3Clear(el) { // stop every glide on el and put it back to its own tempo and full volume
+  for (const r of [...mx3Ramps]) if (r.el === el) mx3Ramps.delete(r); mx3Tick();
+  if (el && el._tm && el._tm !== 1) mx3SetTm(el, 1, true);
+}
+const rateApplyV28 = rateApply;
+rateApply = function () { // speed setting × AutoMix tempo factor (el._tm)
+  const r = rateWant(); if (r == null) return rateApplyV28.apply(this, arguments);
+  for (const el of [audio, mixPre]) { if (!el) continue; try { el.preservesPitch = true; el.mozPreservesPitch = true; el.webkitPreservesPitch = true; const w = r * (el._tm || 1); if (Math.abs(el.playbackRate - w) > 0.001) el.playbackRate = w; el.defaultPlaybackRate = r; } catch (e) {} }
+};
+function mx3Pre() { // pick the plan for the coming blend; glide the outgoing song toward the middle tempo before it starts
+  if (mixFade || mixBusy || !mixOn() || mode !== "audio" || eqRouted || document.hidden || userPaused || audio.paused || (typeof jamOn === "function" && jamOn())) return;
+  const t = queue[qi], d = audio.duration; if (!t || !isFinite(d) || d < 40 || (typeof isPod === "function" && isPod(t))) return;
+  const j = mixNextIndex(); if (j < 0) return;
+  const n = queue[j]; if (!mixInfo.has(n.id) && d - audio.currentTime < 100) mixAnalyse(n); // read the next song early (≈1.5 MB at 48 kbps), so its tempo is known in time
+  const ab = mixInfo.get(t.id), a = ab && ab.v; if (!a) { if (!ab) mixAnalyse(t); return; }
+  const nb = mixInfo.get(n.id), b = nb && nb.v;
+  const plan = mixPlan(a, d), key = t.id + ">" + n.id + "@" + plan.at.toFixed(2);
+  if (!mx3 || mx3.key !== key) { if (mx3 && mx3.pre && typeof mx3.pre === "object" && !mx3.blend && !mixFade) mx3Clear(audio); mx3 = { key, out: t.id, inn: n.id, outTitle: t.title, inTitle: n.title, bpmOut: a.bpm || 0, bpmIn: b ? b.bpm || 0 : 0, plan, tempo: null, gains: null, src: [a.src || (a.cached ? "cache" : ""), b ? b.src || (b.cached ? "cache" : "") : ""] }; window.__mix3 = mx3; }
+  if (b && !mx3.tempo) { mx3.tempo = mx3Tempo(a, b); mx3.gains = mx3Gains(a, b); mx3.bpmIn = b.bpm || 0; mx3.headIn = b.bH; mx3.loud = [a.loud, b.loud]; }
+  const tp = mx3.tempo; if (!tp || !tp.ro || mx3.pre) return;
+  const toAt = plan.at - audio.currentTime; if (toAt > 9 || toAt < 0) return;
+  if (Math.abs(tp.ro - 1) < 0.0005) { mx3.pre = "none"; return; }
+  const ms = Math.min(5000, (toAt - 1.6) / (audio.playbackRate || 1) * 1000);
+  if (ms < 800) { tp.ri = tp.ri / tp.ro; tp.ro = 1; mx3.pre = "late (incoming takes the whole change)"; return; } // too close: leave the outgoing song alone
+  mx3.pre = { ms: Math.round(ms), to: tp.ro }; mx3Ramp(audio, "tm", tp.ro, ms);
+}
+const mixMaybeV28 = mixMaybe;
+mixMaybe = function () { try { mx3Pre(); } catch (e) {} return mixMaybeV28.apply(this, arguments); };
+const mixStartV28 = mixStart;
+mixStart = function (j, n, url, L, head) {
+  try {
+    const st = mx3 && mx3.inn === n.id ? mx3 : null;
+    if (st && mixPre) { if (st.tempo && st.tempo.ri) mx3SetTm(mixPre, st.tempo.ri); st.head = head; if (head > 0.02 && head <= 0.3 && mixPre.readyState >= 1) { try { mixPre.currentTime = head; } catch (e) {} } }
+  } catch (e) {}
+  return mixStartV28.apply(this, arguments);
+};
+const mixCommitV28 = mixCommit;
+mixCommit = function (j, t, url, el, L) {
+  const old = audio, st = mx3 && mx3.inn === t.id && queue[qi] && mx3.out === queue[qi].id ? mx3 : null;
+  const Lw = L / (old.playbackRate || 1); // L is in the outgoing song's seconds; the fade runs on the clock
+  mixCommitV28.call(this, j, t, url, el, Lw);
+  if (!st || !mixFade || mixFade.el !== el || mixFade.old !== old) return;
+  const fade = mixFade; clearInterval(fade.iv);
+  const g = st.gains || { o: 1, i: 1, db: 0 }, tp = st.tempo && st.tempo.ri ? st.tempo : null;
+  const ia = mixInfo.get(st.out), ib = mixInfo.get(st.inn), a = ia && ia.v, b = ib && ib.v;
+  const lock = tp && a && b && a.per && b.per && b.bH != null ? { uo: a.per * Math.max(1, tp.mul), ui: b.per * Math.max(1, 1 / tp.mul), refO: st.plan.at, refI: b.bH } : null;
+  const v0 = old.volume, t0 = performance.now(), ms = Lw * 1000, tmI = el._tm || 1;
+  (window.__mix3log = window.__mix3log || []).push(st); if (window.__mix3log.length > 10) window.__mix3log.shift();
+  st.blend = { L: Math.round(Lw * 100) / 100, at: Date.now(), startOut: Math.round(old.currentTime * 100) / 100, gOut: Math.round(g.o * 1000) / 1000, gIn: Math.round(g.i * 1000) / 1000, rateOut: old.playbackRate, rateIn: tmI * mx3Base(), lock: !!lock, errMs: [] };
+  const step = () => {
+    const x = Math.min(1, (performance.now() - t0) / ms), go = 1 + (g.o - 1) * Math.min(1, x / 0.35);
+    try { old.volume = Math.max(0, Math.min(1, v0 * go * Math.cos(x * Math.PI / 2))); el.volume = Math.max(0, Math.min(1, g.i * Math.sin(x * Math.PI / 2))); } catch (e) {}
+    if (lock && !lock.seeking && x > 0.02 && x < 0.85 && !old.paused && !el.paused && el.readyState >= 3) { // keep the beats on top of each other
+      let dd = (el.currentTime - lock.refI) / lock.ui - (old.currentTime - lock.refO) / lock.uo; dd -= Math.round(dd); // in beats, + = incoming ahead
+      if (st.blend.errMs.length < 400) st.blend.errMs.push(Math.round(dd * lock.ui * 1000));
+      const hs = lock.h || (lock.h = []); hs.push(dd); if (hs.length > 8) hs.shift(); lock.k = lock.k || 0; const da = hs.reduce((p, q) => p + q, 0) / hs.length;
+      if ((lock.snaps || 0) < 2 && x < 0.2 && Math.abs(dd) * lock.ui > 0.035) { // the new song starts a little late (play() latency): while it is still almost silent, jump it onto the beat
+        lock.snaps = (lock.snaps || 0) + 1; (st.blend.snapMs = st.blend.snapMs || []).push(Math.round(dd * lock.ui * 1000)); lock.seeking = true; lock.h = [];
+        const done = () => { lock.seeking = false; }; el.addEventListener("seeked", done, { once: true }); setTimeout(done, 700);
+        try { el.currentTime = Math.max(0, el.currentTime - dd * lock.ui + (lock.lead || 0.055) * (el.playbackRate || 1)); } catch (e) { done(); } // + the time a seek itself takes
+      } else if (++lock.k % 10 === 0) { // every 0.5 s at most (each playbackRate change costs the time-stretcher a little): close the gap over ~2 s
+        const e = da * lock.ui, corr = Math.abs(e) < 0.012 ? 0 : Math.round(Math.max(-0.03, Math.min(0.03, -e / 2)) / 0.005) * 0.005;
+        if (corr !== lock.corr) { lock.corr = corr; lock.changes = (lock.changes || 0) + 1; mx3SetTm(el, tmI * (1 + corr)); }
+      }
+    } else if (lock && x >= 0.85 && el._tm !== tmI) { mx3SetTm(el, tmI); st.blend.rateChanges = lock.changes || 0; }
+    if (x >= 1 || old.ended) {
+      if (mixFade === fade) { mixFade = null; clearInterval(fade.iv); }
+      mixDrop(old);
+      const dur = Math.max(4000, Math.abs(1 - tmI) / 0.004 * 1000);
+      if (Math.abs((el._tm || 1) - 1) > 0.0004) mx3Ramp(el, "tm", 1, dur); else mx3SetTm(el, 1, true);
+      if (g.i < 0.999) mx3Ramp(el, "vol", 1, 10000); else { try { el.volume = 1; } catch (e) {} }
+      st.settle = { tempoMs: Math.round(dur), volMs: g.i < 0.999 ? 10000 : 0, done: Date.now() };
+    }
+  };
+  fade.iv = setInterval(step, 50); step();
+};
+const mixAbortV28 = mixAbort;
+mixAbort = function () {
+  const busy = !!mixFade, r = mixAbortV28.apply(this, arguments);
+  try { const had = mx3Ramps.size || (audio._tm && audio._tm !== 1); mx3Ramps.clear(); mx3Tick(); if (had) { audio._tm = 1; rateApply(); if (!busy) { try { audio.volume = 1; } catch (e) {} } } if (mx3) { mx3.aborted = Date.now(); mx3 = null; } } catch (e) {}
+  return r;
+};
+window.__mix3fn = { analyse: t => { const x = mixAnalyse(t); return x ? x.v : null; }, tempo: mx3Tempo, gains: mx3Gains, plan: (i, d) => mixPlan(i, d), cache: () => mx3Cache, ramps: () => [...mx3Ramps].map(r => ({ kind: r.kind, to: r.to, ms: r.ms, main: r.el === audio })), get state() { return mx3; } };
 
 })();
