@@ -335,6 +335,7 @@ function openTrackSheet(t, ctx, idx) {
     <button data-s="next">Play Next ${ICON.playNext}</button>
     <button data-s="last">Play Last ${ICON.queue}</button>
     <button data-s="radio">📻 Radio shuru karo ${ICON.note}</button>
+    ${isYT(t) && np.classList.contains("open") ? `<button data-s="lyr">🎤 Lyrics ${ICON.note}</button>` : ""}
     ${t.artist && !isYT(t) ? `<button data-s="artist">Artist dekho: ${esc(String(t.artist).split(/,|&| x /).map(x => x.trim()).filter(Boolean).slice(0, 2).join(", "))} ${typeof PERSON_ICON === "string" ? PERSON_ICON : ""}</button>` : ""}
     ${t.src === "saavn" ? `<button data-s="album">Album dekho${t.album ? ": " + esc(t.album) : ""} ${typeof DISC_ICON === "string" ? DISC_ICON : ""}</button>` : ""}
     <button data-s="like">${isLiked(t.id) ? "Unlike" : "Love"} ${isLiked(t.id) ? ICON.heart : ICON.heartO}</button>
@@ -347,6 +348,7 @@ function openTrackSheet(t, ctx, idx) {
     next: () => { addToQueue(t, true); },
     last: () => { addToQueue(t, false); },
     radio: () => { startRadio(t); },
+    lyr: () => { lyrToggle(true); },
     artist: () => { closeNP(); collOpenArtist(t.artist); },
     album: () => { closeNP(); collOpen("als:" + t.id); },
     dl: () => download(t), undl: () => removeDl(t.id), noop: () => {}, off: () => offDownload(t), unoff: () => offRemove(t.id),
@@ -2201,8 +2203,9 @@ function lyrLoad(t) {
 function lyrRender() {
   const p = $("#lyrPanel"); if (!p) return;
   const t = queue[qi], c = lyrCache.get(lyrFor) || {};
-  const head = `<div class="qHead"><b>Lyrics</b><span>${esc((t && t.title) || "")}</span></div>`;
-  if (c.loading) p.innerHTML = head + `<div class="spin"></div>`;
+  const head = "";
+  if (!t) { p.innerHTML = `<div class="lyrNone">Pehle koi gaana chalao</div>`; return; }
+  if (c.loading) p.innerHTML = head + `<div class="lyrNone lyrLoad"><div class="spin"></div>Lyrics la raha hoon…</div>`;
   else if (c.synced) p.innerHTML = head + `<div class="lyrBody synced">${c.synced.map((l, i) => `<p data-li="${i}"${l.x ? "" : ' class="gap"'}>${l.x ? esc(l.x) : "♪"}</p>`).join("")}</div>`;
   else if (c.plain) p.innerHTML = head + `<div class="lyrBody plain">${esc(c.plain).replace(/\n/g, "<br>")}</div>`;
   else p.innerHTML = head + `<div class="lyrNone">Lyrics nahi mile 😕${c.err ? `<br><button class="lyrRetry" data-lyr="retry">Dobara try karo</button>` : ""}</div>`;
@@ -2222,26 +2225,51 @@ function lyrTick(force) {
 function lyrToggle(open) {
   lyrOpenNow = open === undefined ? !lyrOpenNow : !!open;
   const p = $("#lyrPanel"), b = $("#npLyr"); if (!p) return;
-  p.classList.toggle("hidden", !lyrOpenNow); if (b) b.classList.toggle("on", lyrOpenNow); np.classList.toggle("lopen", lyrOpenNow);
-  if (lyrOpenNow) {
+  if (b) b.classList.toggle("on", lyrOpenNow); np.classList.toggle("lopen", lyrOpenNow);
+  const aw = $("#npArtWrap"); if (aw) aw.setAttribute("aria-label", lyrOpenNow ? "Photo dikhao" : "Lyrics dikhao");
+  if (lyrOpenNow) { store.set("lyrHint", 1); lyrThumb();
     if (!$("#queuePanel").classList.contains("hidden")) { $("#queuePanel").classList.add("hidden"); $("#npQueueBtn").classList.remove("on"); np.classList.remove("qopen"); }
     const t = queue[qi]; if (t) lyrLoad(t); else p.innerHTML = `<div class="lyrNone">Pehle koi gaana chalao</div>`;
   }
 }
-{ // now-playing: 🎤 Lyrics + 😴 Sleep buttons, lyrics panel
-  const nb = document.querySelector("#np .npBottom"), qp = $("#queuePanel");
-  if (nb && qp && !$("#npLyr")) {
-    const lb = document.createElement("button"); lb.id = "npLyr"; lb.className = "icon small"; lb.setAttribute("aria-label", "Lyrics"); lb.innerHTML = MIC_ICON;
+{ // now-playing: 😴 Sleep button; 🎤 Lyrics open by tapping the artwork (v22, Apple Music style) — the lyrics take the artwork's place
+  const nb = document.querySelector("#np .npBottom"), qp = $("#queuePanel"), aw = $("#npArtWrap"), meta = document.querySelector("#np .npMeta");
+  if (nb && qp && aw && !$("#lyrPanel")) {
     const sb = document.createElement("button"); sb.id = "npSleep"; sb.className = "icon small"; sb.setAttribute("aria-label", "Sleep timer"); sb.innerHTML = MOON_ICON + "<small></small>";
-    const qb = $("#npQueueBtn"); nb.insertBefore(lb, qb); nb.appendChild(sb);
-    lb.onclick = () => lyrToggle(); sb.onclick = () => sleepSheet();
-    const lp = document.createElement("div"); lp.id = "lyrPanel"; lp.className = "hidden"; qp.after(lp);
+    const qb = $("#npQueueBtn"); nb.appendChild(sb);
+    sb.onclick = () => sleepSheet();
+    const lp = document.createElement("div"); lp.id = "lyrPanel"; aw.appendChild(lp);
+    if (meta && !$("#npThumb")) { const th = document.createElement("img"); th.id = "npThumb"; th.alt = ""; th.setAttribute("aria-label", "Photo dikhao"); th.onclick = e => { e.stopPropagation(); lyrToggle(false); }; meta.insertBefore(th, meta.firstChild); }
+    aw.setAttribute("role", "button"); aw.tabIndex = 0; aw.setAttribute("aria-label", "Lyrics dikhao");
     ["touchstart", "touchmove", "touchend"].forEach(ev => lp.addEventListener(ev, e => { e.stopPropagation(); if (ev !== "touchend") lyrUserScroll = Date.now(); }, { passive: true }));
     lp.addEventListener("wheel", () => { lyrUserScroll = Date.now(); }, { passive: true });
-    lp.addEventListener("click", e => { const r = e.target.closest("[data-lyr=retry]"); if (r) { const t = queue[qi]; if (t) { lyrCache.delete(t.id); lyrLoad(t); } return; } const l = e.target.closest("p[data-li]"); const c = lyrCache.get(lyrFor); if (l && c && c.synced) { const x = c.synced[+l.dataset.li]; if (x) { lyrUserScroll = 0; P.seek(x.t); } } });
+    lp.addEventListener("scroll", () => { if (lyrTap) lyrTap.m = 99; }, { passive: true });
+    // a tap (not a swipe / drag / scroll) on the artwork toggles lyrics; on the lyrics a line seeks, anything else goes back to the photo
+    let lyrTap = null;
+    const tapStart = (x, y) => { lyrTap = { x, y, t: Date.now(), m: 0 }; };
+    const tapMove = (x, y) => { if (lyrTap) lyrTap.m = Math.max(lyrTap.m, Math.abs(x - lyrTap.x) + Math.abs(y - lyrTap.y)); };
+    aw.addEventListener("pointerdown", e => tapStart(e.clientX, e.clientY), true);
+    aw.addEventListener("pointermove", e => tapMove(e.clientX, e.clientY), true);
+    aw.addEventListener("touchstart", e => { const p = e.touches[0]; if (p && !lyrTap) tapStart(p.clientX, p.clientY); }, { capture: true, passive: true });
+    aw.addEventListener("touchmove", e => { const p = e.touches[0]; if (p) tapMove(p.clientX, p.clientY); }, { capture: true, passive: true });
+    aw.addEventListener("click", e => {
+      const s = lyrTap; lyrTap = null;
+      if (s && (s.m > 12 || Date.now() - s.t > 800)) return; // that was a swipe / long press, not a tap
+      if (e.target.closest("#yt")) return;
+      if (!lyrOpenNow) { if (queue[qi]) lyrToggle(true); return; }
+      const r = e.target.closest("[data-lyr=retry]"); if (r) { const t = queue[qi]; if (t) { lyrCache.delete(t.id); lyrLoad(t); } return; }
+      const l = e.target.closest("p[data-li]"); const c = lyrCache.get(lyrFor);
+      if (l && c && c.synced) { const x = c.synced[+l.dataset.li]; if (x) { lyrUserScroll = 0; P.seek(x.t); } return; }
+      lyrToggle(false);
+    });
+    aw.addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && e.target === aw) { e.preventDefault(); if (lyrOpenNow || queue[qi]) lyrToggle(); } });
     if (qb) { const oq = qb.onclick; qb.onclick = function (e) { if (lyrOpenNow) lyrToggle(false); return oq && oq.call(this, e); }; }
+    // one-time hint the first time the player opens with a song
+    new MutationObserver(() => { if (np.classList.contains("open") && queue[qi] && !store.get("lyrHint", 0)) { store.set("lyrHint", 1); setTimeout(() => toast("🎤 Lyrics ke liye photo pe tap karo", 3800), 500); } }).observe(np, { attributes: true, attributeFilter: ["class"] });
+    new MutationObserver(lyrThumb).observe($("#npArt"), { attributes: true, attributeFilter: ["src"] });
   }
 }
+function lyrThumb() { const th = $("#npThumb"), a = $("#npArt"); if (th && a && a.getAttribute("src") && th.getAttribute("src") !== a.getAttribute("src")) th.src = a.getAttribute("src"); }
 const rawUpdateMetaV21 = updateMeta;
 updateMeta = function (t) { rawUpdateMetaV21(t); if (lyrOpenNow && t && t.id !== lyrFor) lyrLoad(t); };
 // one clock for the timer + lyrics: every 'timeupdate' of whichever <audio> is playing (AutoMix swaps them), and once a second
@@ -2261,4 +2289,41 @@ renderLibrary = function () {
 };
 view.addEventListener("click", e => { const b = e.target.closest("[data-act=sleepSet]"); if (b) { e.preventDefault(); e.stopPropagation(); sleepSheet(); } }, true);
 window.__v21 = { colls, arSearch, collOpen, get sleep() { return sleep; }, sleepSet, sleepCancel, get lyr() { return { open: lyrOpenNow, id: lyrFor, cur: lyrCur, data: lyrCache.get(lyrFor) }; }, lyrToggle };
+// ================= v22: time-based greeting on Listen Now (Telegram first name when signed in) =================
+const GREET_SUB = {
+  morning: ["Aaj kya sunoge? 🎧", "Chai ke saath kuch mast sa? ☕", "Din ki shuruaat ek acche gaane se 🎶", "Fresh mood, fresh music ✨"],
+  afternoon: ["Aaj kya sunoge? 🎧", "Chalo kuch mast bajate hain 🎶", "Thoda break, thoda music 🎵", "Aaj ka vibe kya hai? 💫"],
+  evening: ["Chalo kuch mast bajate hain 🎶", "Shaam ho gayi, music on karo 🌇", "Aaj kya sunoge? 🎧", "Thoda music, thoda sukoon 🎵"],
+  night: ["Sone se pehle kuch soft sa? 🌙", "Raat, headphones aur aapke gaane 🎧", "Thoda music, thoda sukoon 🎵", "Aaj kya sunoge? 🎧"],
+};
+let greetSeq = (store.get("greetSeq", 0) + 1) % 1000; store.set("greetSeq", greetSeq);
+function greetData() {
+  const h = new Date().getHours();
+  const k = h >= 5 && h < 12 ? "morning" : h >= 12 && h < 17 ? "afternoon" : h >= 17 && h < 21 ? "evening" : "night";
+  const title = { morning: "Good Morning ☀️", afternoon: "Good Afternoon 🌤️", evening: "Good Evening 🌆", night: "Good Night 🌙" }[k];
+  let name = "";
+  try { if (tgMe && tgMe.linked) name = realName(tgMe.first) || realName(String(tgMe.name || "").split(/\s+/)[0]); } catch (e) {}
+  name = name.split(/\s+/)[0].slice(0, 18);
+  const subs = GREET_SUB[k];
+  return { k, title: name ? title.replace(/ (\S+)$/, `, ${name} $1`) : title, sub: subs[greetSeq % subs.length] };
+}
+function greetHTML() { const g = greetData(); return `<div class="greet ${g.k}" data-greet><b>${esc(g.title)}</b><small>${esc(g.sub)}</small></div>`; }
+function greetPaint() { const el = view.querySelector("[data-greet]"); if (!el) return; const g = greetData(); el.className = "greet " + g.k; el.querySelector("b").textContent = g.title; el.querySelector("small").textContent = g.sub; }
+const rawRenderHomeV22 = renderHome;
+renderHome = function () {
+  const r = rawRenderHomeV22.apply(this, arguments);
+  if (curTab === "home" && !view.querySelector("[data-greet]")) { const hd = view.querySelector("h1.hrow"); if (hd) hd.insertAdjacentHTML("afterend", greetHTML()); }
+  return r;
+};
+new MutationObserver(() => { if (curTab === "home" && !view.querySelector("[data-greet]")) { const hd = view.querySelector(":scope > h1.hrow"); if (hd) hd.insertAdjacentHTML("afterend", greetHTML()); } }).observe(view, { childList: true });
+function greetEnsure() { if (curTab === "home" && !view.querySelector("[data-greet]")) { const hd = view.querySelector(":scope > h1.hrow"); if (hd) hd.insertAdjacentHTML("afterend", greetHTML()); } }
+greetEnsure();
+let greetHiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { greetHiddenAt = Date.now(); return; }
+  if (greetHiddenAt && Date.now() - greetHiddenAt > 60000) { greetSeq = (greetSeq + 1) % 1000; store.set("greetSeq", greetSeq); }
+  greetPaint();
+});
+setInterval(() => { if (!document.hidden) { const el = view.querySelector("[data-greet]"); if (el && !el.classList.contains(greetData().k)) greetPaint(); } }, 60000);
+window.__v22 = { greetData, get lyrOpen() { return lyrOpenNow; }, lyrToggle };
 })();
