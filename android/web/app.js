@@ -258,7 +258,7 @@ function renderSettings() {
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button><a class="dealRow" href="${esc(deals.join || DEALS_JOIN_DEFAULT)}" target="_blank" rel="noopener"><i class="dealEmoji">🛍️</i><span>Join Deals channel <small class="sub">Daily deals</small></span></a></div>
-  ${NATIVE ? `<div class="setCard" style="margin-top:18px"><button class="setRow" data-act="updCheck"><span><b>Check for updates</b><small>Dhun app v${esc(String((appVer && appVer.versionName) || "…"))}</small></span>${ICON.dl}</button></div>` : ""}${NATIVE ? `<div class="setCard" style="margin-top:18px"><button class="setRow" data-act="tcRead"><span><b>Terms &amp; Conditions</b><small>Rules + privacy · Version ${TC_VER}</small></span><i class="tcChev">›</i></button></div>` : ""}${FOOTER()}<div class="verTag">v${esc(String((appVer && appVer.versionName) || "1.0.0"))}</div>`;
+  ${NATIVE ? `<div class="setCard" style="margin-top:18px"><button class="setRow" data-act="updCheck"><span><b>Check for updates</b><small>Dhun app v${esc(String((appVer && appVer.versionName) || "…"))}</small></span>${ICON.dl}</button></div>` : ""}${FOOTER()}<div class="verTag">v${esc(String((appVer && appVer.versionName) || "1.0.0"))}</div>`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -1165,7 +1165,6 @@ window.__m = { P, queue: () => queue, get audio() { return audio; }, doSearch, p
 if (NATIVE) {
   const CapApp = window.Capacitor.Plugins.App;
   if (CapApp) CapApp.addListener("backButton", () => {
-    if (window.__tc && window.__tc.back()) return; // T&C screen: back never skips it
     if (!sheet.classList.contains("hidden")) return closeSheet();
     if (np.classList.contains("open")) return closeNP();
     if (curTab === "library" && subView) { subView = null; return rerender(); }
@@ -2005,85 +2004,4 @@ window.__jam = { get jam() { return jam; }, get off() { return jamOff; }, exp: (
 
 // storage: an update APK left in the app cache after installing is removed (it is ~5 MB and never needed again)
 if (NATIVE && FS) setTimeout(() => { try { if (!updState) FS.deleteFile({ path: "dhun-update.apk", directory: "CACHE" }).catch(() => {}); } catch (e) {} }, 20000);
-
-// ---------- Terms & Conditions: full screen on first open; shown again only when TC_VER goes up ----------
-const TC_VER = 1, TC_DATE = "2 Nov 2026";
-const ACCEPT_LINK = ""; // shown as a button right after Accept; empty = nothing shown
-const ACCEPT_LINK_LABEL = "Open link";
-const ACCEPT_LINK_AUTO = false; // true = open ACCEPT_LINK straight away when the user taps Accept
-const tcSaved = () => store.get("tcOk", null);
-const tcOk = () => { const a = tcSaved(); return !!(a && a.v >= TC_VER); };
-const TC_SEC = [
-  ["🎵 Dhun kya hai", "Dhun ek free, ad-free music player hai (website + Android app). Gaane JioSaavn se stream hote hain; jo gaana wahan na mile wo kabhi kabhi YouTube se chalta hai. Dhun ka JioSaavn, YouTube, Spotify, Apple Music ya Telegram se koi official rishta nahi hai.", "Dhun is a free, ad-free music player. Songs stream from JioSaavn (sometimes YouTube). Dhun is not affiliated with JioSaavn, YouTube, Spotify, Apple Music or Telegram."],
-  ["©️ Gaane kiske hain", "Saare gaane, album art aur naam unke asli maalikon (artists, music labels) ke hain. Dhun sirf aapke personal, non-commercial sunne ke liye hai. Gaane download karke bechna, re-upload karna ya unse paise kamana mana hai.", "All music belongs to its owners. Use Dhun only for personal, non-commercial listening. Do not sell, re-upload or redistribute downloaded songs."],
-  ["☁️ Account aur sync", "Login Telegram bot se hota hai. Login karne pe Dhun ke server pe save hota hai: aapka Telegram naam, username aur ID, liked songs, playlists, recently played, listening history (Recap ke liye) aur Telegram downloads ki list. Bina login ke ye sab sirf aapke phone/browser me rehta hai. Naya user judne pe uska naam/username admin ke private log channel me note hota hai, aur bot se kabhi kabhi updates/announcements aa sakte hain.", "Sign-in is via Telegram. When signed in, the server stores your Telegram name, username and ID, likes, playlists, recently played, listening history (for Recap) and your Telegram downloads list. Without sign-in this stays on your device. New sign-ups are noted in the admin's private log, and the bot may send occasional announcements."],
-  ["📥 Telegram downloads", "\"Download to Telegram\" karne pe gaana aapki apni bot chat me aata hai. Jaldi dene ke liye Dhun ka ek private storage group us gaane ki copy cache me rakhta hai. Android app me \"Download to phone\" gaana sirf app ke andar save karta hai; Telegram connected ho to wo gaana aapki bot chat me bhi aata hai.", "Downloaded songs are sent to your own chat with the Dhun bot; a private storage group keeps a cached copy so repeats are faster. In the Android app, \"Download to phone\" saves inside the app (and also to your bot chat if Telegram is connected)."],
-  ["🎧 Listen Together", "Room ka link jiske paas ho wo join kar sakta hai (max 10 log). Aapka naam, chal raha gaana, queue aur chat room ke sab members ko dikhte hain. Chat me izzat se baat karo: gaali, spam, galat ya illegal cheez mana hai. Room Stop hone pe uska chat aur members server se hat jaate hain; khaali room 6 ghante me apne aap hat jaata hai.", "Anyone with the room link can join (max 10). Your name, the song, queue and chat are visible to everyone in the room. Keep it civil. When a room is stopped its chat and member list are deleted; idle rooms are removed after about 6 hours."],
-  ["🔗 Playlist import", "Spotify / Apple Music import sirf public playlist ka link padhta hai. Dhun aapka Spotify ya Apple account, password ya login kabhi nahi maangta. Gaane JioSaavn pe match kiye jaate hain, isliye kuch gaane galat ya missing ho sakte hain.", "Import reads only public playlist links. Dhun never asks for your Spotify or Apple login. Matches come from JioSaavn and may be wrong or missing."],
-  ["🛍️ Deals", "Deals section ek Telegram deals channel ke posts dikhata hai. Ye third-party shops ke offers hain. Price, stock, quality, delivery aur refund ki zimmedari us shop/seller ki hai, Dhun ki nahi. Kharidne se pehle khud check karo.", "Deals are posts from a Telegram deals channel about third-party shops. Dhun is not responsible for their prices, stock, quality, delivery or refunds. Check before you buy."],
-  ["📱 Aapka phone", "Dhun aapke contacts, photos, location ya phone ki files nahi padhta, aur Android app aisi koi permission nahi maangta. Settings, likes aur playlists phone/browser ki app storage me rehte hain. App naya version Dhun ke server se check karta hai aur install se pehle aapse poochta hai.", "Dhun does not read your contacts, photos, location or files, and the Android app asks for no such permission. Your settings and library are kept in the app's own storage. The app checks Dhun's server for updates and asks before installing."],
-  ["⚠️ Koi guarantee nahi", "Dhun jaisa hai waisa (as is) diya ja raha hai. Gaane kabhi bhi hat sakte hain, service ruk sakti hai, badal sakti hai ya band ho sakti hai. Kisi nuksaan ya data khone ki zimmedari Dhun ki nahi hai.", "Dhun is provided \"as is\" with no warranty. Songs may disappear and the service may change or stop at any time. Dhun is not liable for any loss, including lost data."],
-  ["🙋 Aapki zimmedari", "Dhun ko apne desh ke kanoon ke hisaab se, sahi tareeke se use karo. App ya server ko hack, spam ya overload karne ki koshish mat karo. Apne Telegram account ki safety aapki zimmedari hai.", "Use Dhun lawfully. Don't try to hack, spam or overload it. You are responsible for your own Telegram account."],
-  ["🔞 Umar", "Dhun use karne ke liye aapki umar kam se kam 13 saal honi chahiye. 18 se kam ho to apne parents/guardian ki permission se use karo.", "You must be at least 13. If you are under 18, use Dhun with a parent's or guardian's permission."],
-  ["🗑️ Data hatwana / Contact", "Telegram unlink karne se is device ka login hat jaata hai. Server pe save aapka data delete karwana ho, ya koi sawal/shikayat ho, to Telegram pe @Memer_guru ko message karo.", "Unlinking Telegram signs this device out. To delete the data stored on the server, or for any question, message @Memer_guru on Telegram."],
-  ["📝 Badlav", "Ye terms kabhi bhi update ho sakte hain. Bada badlav hone pe Dhun aapse dobara Accept karne ko kahega. Accept karke aage use karne ka matlab hai aap naye terms se sahmat hain.", "These terms may change. For a major change Dhun will ask you to accept again. Continuing to use Dhun means you agree to the current terms."],
-];
-const tcFmtAt = ms => { try { return new Date(ms).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch (e) { return ""; } };
-function tcDocHTML() {
-  return `<div class="tcIntro">Dhun use karne se pehle ye Terms &amp; Conditions aur Privacy padh lo. <span class="tcEn">Please read these Terms &amp; Conditions and Privacy notes before using Dhun.</span></div>` +
-    TC_SEC.map(([h, hi, en]) => `<section class="tcSec"><h3>${h}</h3><p>${esc(hi)}</p><p class="tcEn">${esc(en)}</p></section>`).join("") +
-    `<div class="tcContact"><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>@Memer_guru</span></a></div>` +
-    `<div class="tcEnd" id="tcEnd">Version ${TC_VER} · ${TC_DATE}<div class="sig">Mavi💖</div></div>`;
-}
-let tcEl = null, tcMode = "", tcView = "";
-function tcClose() { if (tcEl) tcEl.remove(); tcEl = null; tcMode = tcView = ""; document.documentElement.classList.remove("tcLock"); }
-function tcRender(view) {
-  tcView = view; const a = tcSaved();
-  if (view === "doc") {
-    const foot = tcMode === "gate"
-      ? `<div class="tcHint" id="tcHint">↓ Neeche tak padho, phir Accept dabao</div><div class="tcBtns"><button class="tcNo" data-tc="decline">Decline</button><button class="tcYes" data-tc="accept" id="tcAccept" disabled>Accept</button></div>`
-      : `<div class="tcHint ok">${a && a.at ? `✅ Aapne ${esc(tcFmtAt(a.at))} ko accept kiya` : ""}</div><div class="tcBtns"><button class="tcYes" data-tc="close">Close</button></div>`;
-    tcEl.innerHTML = `<div class="tcHead"><img src="/dhun-mark.png" alt="" width="34" height="34"><div><h2>Terms &amp; Conditions</h2><small>Privacy bhi · Version ${TC_VER} · ${TC_DATE}</small></div></div><div class="tcBody" id="tcBody">${tcDocHTML()}</div><div class="tcFoot">${foot}</div>`;
-    const b = tcEl.querySelector("#tcBody");
-    if (tcMode === "gate") { b.addEventListener("scroll", tcCheck, { passive: true }); setTimeout(tcCheck, 60); setTimeout(tcCheck, 600); }
-    return;
-  }
-  if (view === "declined") {
-    tcEl.innerHTML = `<div class="tcMsg"><div class="tcBig">🙏</div><h2>Accept karna zaroori hai</h2><p>Dhun use karne ke liye Terms &amp; Conditions accept karne honge. Koi baat nahi, jab mann ho wapas aake padh lena.</p><p class="tcEn">You need to accept the Terms &amp; Conditions to use Dhun.</p><button class="tcYes" data-tc="again">Terms dobara padho</button>${typeof NATIVE !== "undefined" && NATIVE ? `<button class="tcNo" data-tc="exit">App band karo</button>` : ""}</div>`;
-    return;
-  }
-  if (view === "link") {
-    tcEl.innerHTML = `<div class="tcMsg"><div class="tcBig">💖</div><h2>Shukriya!</h2><p>Aapne Terms accept kar liye. Enjoy Dhun 🎵</p><a class="tcYes tcLinkBtn" data-tc="link" href="${esc(ACCEPT_LINK)}" target="_blank" rel="noopener">${esc(ACCEPT_LINK_LABEL)}</a><button class="tcNo" data-tc="close">Aage badho</button></div>`;
-  }
-}
-function tcCheck() {
-  if (!tcEl || tcView !== "doc" || tcMode !== "gate") return;
-  const b = tcEl.querySelector("#tcBody"), btn = tcEl.querySelector("#tcAccept"); if (!b || !btn || !btn.disabled) return;
-  if (b.scrollTop + b.clientHeight >= b.scrollHeight - 24) { btn.disabled = false; const h = tcEl.querySelector("#tcHint"); if (h) { h.textContent = "✅ Padh liya. Ab Accept dabao"; h.classList.add("ok"); } }
-}
-function tcOpen(mode) {
-  if (tcEl) tcClose();
-  tcMode = mode; tcEl = document.createElement("div"); tcEl.id = "tc"; tcEl.setAttribute("role", "dialog"); tcEl.setAttribute("aria-modal", "true");
-  if (mode === "read") tcEl.classList.add("read");
-  document.body.appendChild(tcEl); document.documentElement.classList.add("tcLock"); tcRender("doc");
-  tcEl.addEventListener("click", e => {
-    const x = e.target.closest("[data-tc]"); if (!x) return; const k = x.dataset.tc;
-    if (k === "accept") {
-      if (x.disabled) return;
-      store.set("tcOk", { v: TC_VER, at: Date.now() });
-      if (ACCEPT_LINK && ACCEPT_LINK_AUTO) { try { window.open(ACCEPT_LINK, "_blank", "noopener"); } catch (e2) {} tcClose(); }
-      else if (ACCEPT_LINK) tcRender("link");
-      else tcClose();
-      toast("Terms accepted ✅");
-    } else if (k === "decline") tcRender("declined");
-    else if (k === "again") tcRender("doc");
-    else if (k === "close") tcClose();
-    else if (k === "link") setTimeout(tcClose, 400);
-    else if (k === "exit") { try { const A = window.Capacitor && window.Capacitor.Plugins.App; if (A && A.exitApp) A.exitApp(); } catch (e2) {} }
-  });
-}
-window.addEventListener("resize", () => setTimeout(tcCheck, 50));
-document.addEventListener("click", e => { if (e.target.closest("[data-act=tcRead]")) { e.preventDefault(); e.stopPropagation(); tcOpen("read"); } }, true);
-if (NATIVE && !tcOk()) tcOpen("gate"); // Android app only (the website has no T&C screen)
-window.__tc = { get ok() { return tcOk(); }, get saved() { return tcSaved(); }, open: tcOpen, close: tcClose, get mode() { return tcMode; }, get view() { return tcView; }, VER: TC_VER, back() { if (!tcEl) return false; if (tcMode === "read") { tcClose(); return true; } if (tcView !== "doc") tcRender("doc"); return true; } };
 })();
