@@ -1,10 +1,10 @@
 {
-  "versionCode": 19,
-  "versionName": "1.0.4",
+  "versionCode": 20,
+  "versionName": "1.0.5",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Naya design ✨ Browse tiles, Top Charts/Mood Mixes cards, iPhone jaisa glass song menu (Bass Boost ab sirf EQ me), naya Share Card",
+  "notes": "AutoMix ab Apple Music jaisa 🎧 dono gaano ki speed (BPM) match, beat aur phrase pe smooth mix, khamoshi skip, awaaz barabar",
   "force": false,
-  "size": 4991775,
-  "bytes": 4991775,
-  "sha256": "57da339c8deebcb2dd8cffb96cd4e6030becc7e5e62f84937fce38ecdbd7f295"
+  "size": 4998603,
+  "bytes": 4998603,
+  "sha256": "82026894c91707a5d34e1f7286534c8e5ccff794068652d765d24d4e07f305fd"
 }
