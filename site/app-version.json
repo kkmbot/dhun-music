@@ -1,10 +1,10 @@
 {
-  "versionCode": 20,
-  "versionName": "1.0.5",
+  "versionCode": 21,
+  "versionName": "1.0.6",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "AutoMix ab Apple Music jaisa 🎧 dono gaano ki speed (BPM) match, beat aur phrase pe smooth mix, khamoshi skip, awaaz barabar",
+  "notes": "Naya welcome ✨ apni languages aur favourite artists chuno, Home unke hisaab se bane",
   "force": false,
-  "size": 4998603,
-  "bytes": 4998603,
-  "sha256": "82026894c91707a5d34e1f7286534c8e5ccff794068652d765d24d4e07f305fd"
+  "size": 5029213,
+  "bytes": 5029213,
+  "sha256": "e81adc40921b256d94ee4f6c4beb5c36dbffe0b876588f8cbf0b420c04165324"
 }
