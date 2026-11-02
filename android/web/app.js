@@ -3211,41 +3211,7 @@ function scWrap(ctx, text, maxW, maxLines) {
   return lines.map(s => { let x = s; if (ctx.measureText(x).width <= maxW) return x; while (x.length > 1 && ctx.measureText(x + "…").width > maxW) x = x.slice(0, -1); return x + "…"; });
 }
 function scRound(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-async function shareCardDraw(t, line) {
-  const W = 1080, H = 1920, cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d");
-  const big = String(t.thumb || "").replace(/(150x150|50x50)/, "500x500") || ytThumb(t.id);
-  try { await Promise.all([document.fonts.load('700 64px "DhunComic"'), document.fonts.load('400 40px "DhunComic"')]); } catch (e) {}
-  const [art, mark] = await Promise.all([scLoadImg(big), scLoadImg(V23_NATIVE ? "/dhun-mark.png" : "/dhun-mark.webp?v=16")]);
-  ctx.fillStyle = "#0b0710"; ctx.fillRect(0, 0, W, H);
-  if (art) { // blurred background: draw tiny, scale up (works everywhere, no canvas filter needed)
-    const s = document.createElement("canvas"); s.width = 18; s.height = 32; const sx = s.getContext("2d"); sx.drawImage(art, art.width * 0.2, 0, art.width * 0.6, art.height, 0, 0, 18, 32);
-    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.globalAlpha = 0.95; ctx.drawImage(s, -40, -40, W + 80, H + 80); ctx.globalAlpha = 1;
-  }
-  let g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "rgba(10,6,16,.25)"); g.addColorStop(0.55, "rgba(10,6,16,.45)"); g.addColorStop(1, "rgba(8,5,12,.92)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  const A = 760, ax = (W - A) / 2, ay = line ? 230 : 330;
-  ctx.save(); ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = 70; ctx.shadowOffsetY = 30; scRound(ctx, ax, ay, A, A, 44); ctx.fillStyle = "#222"; ctx.fill(); ctx.restore();
-  ctx.save(); scRound(ctx, ax, ay, A, A, 44); ctx.clip(); if (art) ctx.drawImage(art, ax, ay, A, A); else { ctx.fillStyle = "#2a2030"; ctx.fillRect(ax, ay, A, A); } ctx.restore();
-  ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.lineWidth = 2; scRound(ctx, ax + 1, ay + 1, A - 2, A - 2, 43); ctx.stroke();
-  let y = ay + A + 110; ctx.textAlign = "center"; ctx.fillStyle = "#fff";
-  ctx.font = '700 66px "DhunComic", "Comic Neue", system-ui, sans-serif';
-  for (const l of scWrap(ctx, t.title, W - 160, 2)) { ctx.fillText(l, W / 2, y); y += 78; }
-  ctx.font = '400 42px "DhunComic", "Comic Neue", system-ui, sans-serif'; ctx.fillStyle = "rgba(255,255,255,.72)";
-  for (const l of scWrap(ctx, t.artist || "", W - 200, 1)) { ctx.fillText(l, W / 2, y + 4); y += 56; }
-  if (line) { // lyric line on a glass card
-    ctx.font = 'italic 700 52px "DhunComic", "Comic Neue", system-ui, sans-serif';
-    const ls = scWrap(ctx, "“" + line + "”", W - 260, 4), ch = ls.length * 66 + 70, cy = y + 30;
-    ctx.save(); scRound(ctx, 90, cy, W - 180, ch, 40); ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
-    const gl = ctx.createLinearGradient(90, cy, 90, cy + 40); gl.addColorStop(0, "rgba(255,255,255,.18)"); gl.addColorStop(1, "rgba(255,255,255,0)"); ctx.save(); scRound(ctx, 90, cy, W - 180, ch, 40); ctx.clip(); ctx.fillStyle = gl; ctx.fillRect(90, cy, W - 180, 40); ctx.restore();
-    ctx.fillStyle = "#fff"; let ly = cy + 76; for (const l of ls) { ctx.fillText(l, W / 2, ly); ly += 66; }
-  }
-  // footer: logo + Dhun + Mavi💖 + link
-  const fy = H - 170;
-  if (mark) { const mh = 86, mw = mark.width * mh / mark.height; ctx.drawImage(mark, W / 2 - mw - 70, fy - mh + 18, mw, mh); }
-  ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = '700 58px "DhunComic", "Comic Neue", system-ui, sans-serif'; ctx.fillText("Dhun", W / 2 - 50, fy);
-  ctx.font = '400 30px "DhunComic", "Comic Neue", system-ui, sans-serif'; ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fillText("Mavi💖", W / 2 + 100, fy - 4);
-  ctx.textAlign = "center"; ctx.font = '700 36px "DhunComic", "Comic Neue", system-ui, sans-serif'; ctx.fillStyle = "#fa2d48"; ctx.fillText("dhun.sites.tab.bot", W / 2, fy + 78);
-  return cv;
-}
+// (v28: shareCardDraw lives in the "v28: Share Card variant A" block at the end)
 async function shareCard(t, line) {
   if (!t) return;
   toast(tr("Card bana raha hoon…"));
@@ -3836,20 +3802,19 @@ function v25Menu(t, ctx) {
     off: [V25I.phone, () => v25L("Download to Phone", "Phone me download", "फ़ोन में डाउनलोड")], unoff: [V25I.phone, () => v25L("Remove from Phone", "Phone se hatao", "फ़ोन से हटाएँ"), "danger"],
     v23card: [V25I.card, () => v25L("Share Card", "Share card", "शेयर कार्ड")], rm: [ICON.trash, () => v25L("Remove from Playlist", "Playlist se hatao", "प्लेलिस्ट से हटाएँ"), "danger", 1],
     rmr: [ICON.trash, () => v25L("Remove from History", "History se hatao", "इतिहास से हटाएँ"), "danger", 1] };
-  let speedB = null, bassB = null;
+  let speedB = null;
   for (const b of btns) {
     if (used.has(b)) continue; used.add(b); const k = b.dataset.s;
     if (k === "v23speed") { speedB = b; continue; }
-    if (k === "v23bass") { bassB = b; continue; }
+    if (k === "v23bass") continue; // v28: Bass Boost lives in Equalizer only
     const kn = KNOWN[k];
     if (kn) { (kn[3] ? danger : tail).push(row(k, kn[0], kn[1](), { cls: kn[2] || "" })); continue; }
     b.classList.add("v25r", "v25carry"); tail.push(b); // anything else (e.g. "Sending to Telegram… / Downloading 45%") moves over as-is, live labels intact
   }
   let pb = "";
-  if (speedB || bassB) {
+  if (speedB) {
     const opts = [0.75, 1, 1.25, 1.5]; if (!opts.some(r => Math.abs(r - pbRate) < 0.001)) { opts.push(pbRate); opts.sort((a, b) => a - b); }
     if (speedB) pb += `<div class="v25pr${jam ? " off" : ""}"><i class="v25i">${V25I.speed}</i><span class="v25l" data-notr>${esc(v25L("Speed", "Speed", "स्पीड"))}</span><div class="v25seg">${opts.map(r => `<button data-s="v25rate" data-r="${r}" class="${!jam && Math.abs(r - pbRate) < 0.001 || jam && r === 1 ? "on" : ""}" data-notr>${rateLabel(r)}</button>`).join("")}</div></div>`;
-    if (bassB) pb += `<div class="v25pr"><i class="v25i">${V25I.bass}</i><span class="v25l" data-notr>${esc(v25L("Bass Boost", "Bass Boost", "बेस बूस्ट"))}</span><button class="v25sw${bassOn() ? " on" : ""}" data-s="v25bass" role="switch" aria-checked="${bassOn()}" aria-label="Bass Boost"></button></div>`;
   }
   const cancel = sheet.querySelector(".sgroup.cancel");
   const wrap = document.createElement("div"); wrap.className = "v25m";
@@ -3867,7 +3832,6 @@ function v25Menu(t, ctx) {
     const b = e.target.closest("[data-s]"); const k = b && b.dataset.s;
     if (k === "v25aa") { closeSheet(); setTimeout(() => v25ArtistAlbum(t, !!ar, !!al), 40); return; }
     if (k === "v25rate") { if (jam) return toast(tr("Listen Together me speed 1× rehti hai")); setRate(+b.dataset.r); sheet.querySelectorAll("[data-s=v25rate]").forEach(x => x.classList.toggle("on", x === b)); return; }
-    if (k === "v25bass") { bassToggle(); b.classList.toggle("on", bassOn()); b.setAttribute("aria-checked", String(bassOn())); return; }
     return oc && oc(e);
   };
 }
@@ -4050,5 +4014,274 @@ try { hdrD(view); } catch (e) {}
 // v26: repaint the greeting once Telegram answers, so the real first name shows without waiting for the next Home render
 if (typeof tgRefresh === "function") { const tgRefreshV26 = tgRefresh; tgRefresh = async function () { const r = await tgRefreshV26.apply(this, arguments); try { greetPaint(); } catch (e) {} return r; }; }
 window.__v26 = { hdr: () => hdrD(view) };
+
+// ===== v27: Browse tiles variant A (approved) =====
+// ---- Browse tiles: shared helpers (artwork per category, cached 3 days; no network if cached) ----
+const TL_EMO = { "Bollywood": "🎬", "Arijit Singh": "🎤", "Punjabi": "🥁", "Romantic": "💖", "Lofi": "🎧", "Old is Gold": "📻", "Bhajan": "🪔", "Workout": "💪", "Sad Songs": "💔", "English Pop": "🎵", "Party": "🪩", "Trending Now": "🔥" };
+const TL_EXTRA = { "Party": "#ff4d8d,#7b1fa2", "Trending Now": "#fa2d48,#7a0f22" };
+const tlQ = n => n === "Old is Gold" ? "old hindi songs" : n === "Trending Now" ? "trending hindi songs" : n + " songs";
+const tlG = n => { const c = CHIPS.find(x => x[0] === n); return ((c && c[1]) || TL_EXTRA[n] || "#fa2d48,#7a0f22").split(","); };
+let tlArt = store.get("tlArt", {}); let tlBusy = false;
+const tlSz = (u, s) => String(u || "").replace(/\d{2,3}x\d{2,3}(?=\.\w+$)/, s + "x" + s);
+let TL_NEED = 1; // thumbs each tile shows; later tiles avoid artwork an earlier tile already shows
+function tlImgs(n) { const a = tlArt[n]; return a && a.t || []; }
+function tlPicks() { const used = new Set(), out = {}; for (const n of CHIPS.map(x => x[0]).concat(Object.keys(TL_EXTRA))) { const t = tlImgs(n), f = t.filter(u => !used.has(u)); out[n] = f.concat(t.filter(u => used.has(u))); f.slice(0, TL_NEED).forEach(u => used.add(u)); } return out; }
+async function tlLoad(names) {
+  if (tlBusy) return; tlBusy = true;
+  try {
+    const now = Date.now(), need = names.filter(n => !tlArt[n] || now - tlArt[n].at > 3 * 864e5);
+    for (let i = 0; i < need.length; i += 3) {
+      await Promise.all(need.slice(i, i + 3).map(async n => {
+        try { const d = await api(`/api/search?kind=songs&q=${encodeURIComponent(tlQ(n))}`); const t = []; for (const s of d.items || []) { if (s.thumb && !t.includes(s.thumb)) t.push(s.thumb); if (t.length >= 6) break; } if (t.length) tlArt[n] = { t, at: now }; } catch (e) {}
+      }));
+      store.set("tlArt", tlArt); tlPaint();
+    }
+  } finally { tlBusy = false; }
+}
+function tlPaint() { // fills <img data-tli="name" data-k="0" data-s="150"> without re-rendering
+  const P = tlPicks(); view.querySelectorAll("img[data-tli]").forEach(im => { const u = (P[im.dataset.tli] || [])[+im.dataset.k || 0]; if (u && !im.getAttribute("src")) { im.onload = () => im.classList.add("on"); im.src = tlSz(u, im.dataset.s || 150); } });
+}
+const tlImg = (n, k, s, cls) => `<img data-tli="${esc(n)}" data-k="${k}" data-s="${s}" class="${cls || ""}" alt="" loading="lazy" decoding="async">`;
+function tlHook(render) { // re-skins the Browse block each time the Search home renders
+  const prev = renderSearch;
+  renderSearch = function () { const r = prev.apply(this, arguments); try { const s = searchState; if (!subView && !s.q && !s.typing) { const sb = $("#sbody"), c = sb && sb.querySelector(".chips"); if (c && !c.dataset.tl) { render(sb, c); c.dataset.tl = "1"; if (c.querySelector("img[data-tli]")) { tlPaint(); tlLoad(CHIPS.map(x => x[0]).concat(Object.keys(TL_EXTRA))); } } } } catch (e) { console.warn("tiles", e); } return r; };
+}
+
+// Variant A — Apple Music Browse cards: 2-col 16:10 rounded rects, rich gradient, bold label top-left, tilted artwork peeking bottom-right
+tlHook((sb, c) => {
+  c.className = "chips tlA";
+  c.innerHTML = CHIPS.map(([n]) => { const [a, b] = tlG(n); return `<button class="tlCard" data-sq="${esc(tlQ(n))}" style="--a:${a};--b:${b}"><span class="tlL">${esc(n)}</span>${tlImg(n, 0, 150, "tlArt")}</button>`; }).join("");
+});
+
+// ===== v28: Top Charts / Mood Mixes cards variant A (approved) =====
+// Integration: paste before the final `})();` in app.js (site + android/web), after the v27 tiles block; needs CHART_TILES, MOOD_TILES, collURL, colls, collTitle, collPlayAll, homeExtraHTML, renderHome, store, api, esc, view, ICON, toast.
+// ---- Home card rows (Top Charts / Mood Mixes): shared helpers ----
+// Artwork per row tile = real song covers from that chart/mix (cached 1 day; data also warms colls[] so opening is instant).
+let crdArt = store.get("crdArt", {}); let crdBusy = false;
+const crdKeys = () => CHART_TILES.map(x => "chart:" + x[0]).concat(MOOD_TILES.map(x => "mood:" + x[0]));
+const crdSz = (u, s) => String(u || "").replace(/\d{2,3}x\d{2,3}(?=\.\w+$)/, s + "x" + s);
+function crdPicks() { // 4 covers per tile, avoiding covers an earlier tile already leads with
+  const used = new Set(), out = {};
+  for (const k of crdKeys()) { const t = (crdArt[k] && crdArt[k].t) || [], f = t.filter(u => !used.has(u)); out[k] = f.concat(t.filter(u => used.has(u))); f.slice(0, 4).forEach(u => used.add(u)); }
+  return out;
+}
+async function crdLoad() {
+  if (crdBusy) return; crdBusy = true;
+  try {
+    const now = Date.now(), need = crdKeys().filter(k => !crdArt[k] || now - crdArt[k].at > 864e5);
+    for (let i = 0; i < need.length; i += 4) {
+      await Promise.all(need.slice(i, i + 4).map(async k => {
+        try {
+          const d = await api(collURL(k)); const t = [];
+          for (const s of (d && d.items) || []) { if (s.thumb && !t.includes(s.thumb)) t.push(s.thumb); if (t.length >= 8) break; }
+          if (t.length) crdArt[k] = { t, n: d.items.length, at: now };
+          if (d && d.items && d.items.length && !(colls[k] && colls[k].items)) colls[k] = d;
+        } catch (e) {}
+      }));
+      store.set("crdArt", crdArt); crdPaint();
+    }
+  } finally { crdBusy = false; }
+}
+function crdPaint() { // fills <img data-crd="chart:hindi" data-k="0" data-s="150"> + [data-crdn] counts, no re-render
+  const P = crdPicks();
+  view.querySelectorAll("img[data-crd]").forEach(im => { const u = (P[im.dataset.crd] || [])[+im.dataset.k || 0]; if (u && !im.getAttribute("src")) { im.onload = () => im.classList.add("on"); im.src = crdSz(u, im.dataset.s || 150); } });
+  view.querySelectorAll("[data-crdn]").forEach(el => { const a = crdArt[el.dataset.crdn]; if (a && a.n) el.textContent = a.n + " songs"; });
+}
+const crdImg = (k, i, s, cls) => `<img data-crd="${esc(k)}" data-k="${i}" data-s="${s}" class="${cls || ""}" alt="" loading="lazy" decoding="async">`;
+// rows: [key, label, kind ("chart"|"mood"), gradient "a,b", emoji]
+const crdRows = () => ({
+  charts: CHART_TILES.map(([l, n, g]) => ["chart:" + l, n, "chart", g, "🔥"]),
+  moods: MOOD_TILES.map(([m, n, e, g]) => ["mood:" + m, n, "mood", g, e])
+});
+function crdHook(tile, cls) { // replaces the two Home rows; headings unchanged (translated as before)
+  homeExtraHTML = function () {
+    const R = crdRows();
+    return `<h2>🔥 Top Charts</h2><div class="car crd ${cls}">${R.charts.map(tile).join("")}</div>
+  <h2>😊 Mood Mixes</h2><div class="car crd ${cls}">${R.moods.map(tile).join("")}</div>`;
+  };
+  const prevHome = renderHome;
+  renderHome = function () { const r = prevHome.apply(this, arguments); try { if (view.querySelector(".crd img[data-crd], .crd [data-crdn]")) { crdPaint(); crdLoad(); } } catch (e) { console.warn("cards", e); } return r; };
+}
+
+// Variant A — Apple Music playlist cards: real song cover + colour gradient overlay, big label inside the art, one grey caption below
+crdHook(([k, n, kind, g]) => { const [a, b] = g.split(",");
+  const top = kind === "chart" ? (k === "chart:trending" ? "TODAY" : "TOP 50") : "MIX";
+  const big = k === "chart:trending" ? "Trending" : n;
+  const cap = kind === "chart" ? (k === "chart:trending" ? "Aaj ke hits" : "Updated weekly") : "Dhun Mix";
+  return `<button class="tile cTile crdA" data-coll="${esc(k)}" style="--a:${a};--b:${b}"><span class="crdArt">${crdImg(k, 0, 500, "crdCov")}<span class="crdOv"></span><span class="crdTop">${top}</span><b class="crdBig">${esc(big)}</b></span><div class="crdCap" data-notr>${cap}</div></button>`;
+}, "crdRowA");
+
+// ===== v28: Share Card variant A (approved, no credit line) =====
+// ===== Dhun Share card variant A — Apple-Music style (glass card with big artwork on a blurred-artwork background; 1080×1920 PNG).
+// HOW TO APPLY: paste this whole block into site/app.js (and dhun-android/app/web/app.js) just BEFORE the final `})();`.
+// It re-declares `function shareCardDraw(t, line)` (a later function declaration in the same IIFE wins, so shareCard(),
+// the lyric long-press and window.__v23.shareCardDraw all use it). Uses existing helpers scLoadImg/scWrap/scRound/ytThumb/V23_NATIVE.
+// Artwork loads exactly like before (JioSaavn CDN with crossOrigin=anonymous, which sends CORS headers) so the canvas stays untainted.
+// No CSS needed. Bump the SW cache version when publishing.
+
+// ---- shared helpers (sc2*) ----
+const SC2F = '"DhunComic", "Comic Neue", "Comic Sans MS", "Noto Sans Devanagari", "Kohinoor Devanagari", system-ui, sans-serif';
+const sc2Font = (w, px, it) => `${it ? "italic " : ""}${w} ${px}px ${SC2F}`;
+async function sc2Assets(t) {
+  const big = String(t.thumb || "").replace(/(150x150|50x50)/, "500x500") || ytThumb(t.id);
+  try { await Promise.all([document.fonts.load('700 64px "DhunComic"'), document.fonts.load('400 40px "DhunComic"'), document.fonts.load('700 40px "DhunComic"', "सय")]); } catch (e) {}
+  const [art, mark] = await Promise.all([scLoadImg(big), scLoadImg(V23_NATIVE ? "/dhun-mark.png" : "/dhun-mark.webp?v=16")]);
+  return { art, mark };
+}
+// soft blur without ctx.filter (iOS Safari has none): shrink in steps, then scale up smoothly
+function sc2Blur(src, w, h, crop) {
+  const c = document.createElement("canvas"); c.width = 12; c.height = Math.max(8, Math.round(12 * h / w)); const x = c.getContext("2d");
+  x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high";
+  const sw = src.width, sh = src.height, k = crop || 1, cw = sw * k, ch = Math.min(sh, cw * h / w); x.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, c.width, c.height);
+  const m = document.createElement("canvas"); m.width = 48; m.height = Math.round(48 * c.height / c.width); const mx = m.getContext("2d"); mx.imageSmoothingEnabled = true; mx.imageSmoothingQuality = "high"; mx.drawImage(c, 0, 0, m.width, m.height);
+  return m;
+}
+// dominant (saturation-weighted average) colour of the artwork; [r,g,b]; never throws
+function sc2Color(art, fb) {
+  fb = fb || [250, 45, 72]; if (!art) return fb;
+  try {
+    const c = document.createElement("canvas"); c.width = c.height = 24; const x = c.getContext("2d"); x.drawImage(art, 0, 0, 24, 24);
+    const d = x.getImageData(0, 0, 24, 24).data; let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { const R = d[i], G = d[i + 1], B = d[i + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B), s = mx ? (mx - mn) / mx : 0, wgt = 0.05 + s * s * (mx > 40 && mx < 245 ? 1 : 0.2); r += R * wgt; g += G * wgt; b += B * wgt; n += wgt; }
+    return n ? [r / n, g / n, b / n].map(Math.round) : fb;
+  } catch (e) { return fb; }
+}
+// scale a colour so white text on it stays readable
+function sc2Deep(c, L) { const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2], k = l > L ? L / l : 1; return c.map(v => Math.round(v * k)); }
+const sc2Rgb = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a == null ? 1 : a})`;
+// fit text: biggest size (from sizes) that fits in maxLines without "…"; else smallest size ellipsized
+function sc2Fit(ctx, text, maxW, maxLines, sizes, w, it) {
+  const at = px => { ctx.font = sc2Font(w, px, it); const lines = scWrap(ctx, text, maxW, maxLines); return { px, lines, ok: !lines.some(l => /…$/.test(l)), last: ctx.measureText(lines[lines.length - 1] || "").width }; };
+  for (let i = 0; i < sizes.length; i++) {
+    const r = at(sizes[i]); if (!r.ok && i < sizes.length - 1) continue;
+    if (r.ok && r.lines.length > 1 && r.last < maxW * 0.28) { // avoid a lonely last word: take a smaller size that saves a line
+      for (let j = i + 1; j < sizes.length; j++) { const s = at(sizes[j]); if (s.ok && s.lines.length < r.lines.length) { ctx.font = sc2Font(w, s.px, it); return s; } }
+    }
+    ctx.font = sc2Font(w, r.px, it); return r;
+  }
+}
+function sc2Cover(ctx, img, x, y, w, h) { const s = Math.max(w / img.width, h / img.height), sw = w / s, sh = h / s; ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, y, w, h); }
+function sc2Art(ctx, art, x, y, w, h, r) { ctx.save(); scRound(ctx, x, y, w, h, r); ctx.clip(); if (art) sc2Cover(ctx, art, x, y, w, h); else { const g = ctx.createLinearGradient(x, y, x + w, y + h); g.addColorStop(0, "#fa2d48"); g.addColorStop(1, "#5b2a86"); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.font = sc2Font(700, Math.round(w * 0.3)); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("♪", x + w / 2, y + h / 2); ctx.textBaseline = "alphabetic"; } ctx.restore(); }
+// brand lockup: mark + "Dhun" (left edge x or centred at cx when align="center"), returns width
+function sc2Brand(ctx, mark, x, y, h, align, col) {
+  ctx.font = sc2Font(700, Math.round(h * 0.62)); const tw = ctx.measureText("Dhun").width, mw = mark ? mark.width * h / mark.height : 0, gap = mark ? h * 0.18 : 0, W = mw + gap + tw;
+  const x0 = align === "center" ? x - W / 2 : align === "right" ? x - W : x;
+  if (mark) ctx.drawImage(mark, x0, y, mw, h);
+  ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = col || "#fff"; ctx.fillText("Dhun", x0 + mw + gap, y + h * 0.56); ctx.textBaseline = "alphabetic";
+  return W;
+}
+const SC2URL = "dhun.sites.tab.bot";
+
+async function shareCardDraw(t, line) {
+  const W = 1080, H = 1920, cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d");
+  const { art, mark } = await sc2Assets(t), col = sc2Deep(sc2Color(art, [60, 30, 70]), 110);
+  ctx.fillStyle = sc2Rgb(sc2Deep(col, 40)); ctx.fillRect(0, 0, W, H);
+  if (art) { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(sc2Blur(art, W, H, 0.7), -60, -60, W + 120, H + 120); }
+  let g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "rgba(8,5,12,.28)"); g.addColorStop(0.5, "rgba(8,5,12,.40)"); g.addColorStop(1, "rgba(8,5,12,.70)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // measure the card
+  const cx = 90, cw = W - 180, pad = 44, A = cw - pad * 2, tw = A;
+  const T = sc2Fit(ctx, t.title || "", tw, 2, [74, 64, 54], 700), tlh = Math.round(T.px * 1.2);
+  ctx.font = sc2Font(400, 40); const AR = scWrap(ctx, t.artist || "", tw, 1);
+  const Lq = line ? sc2Fit(ctx, "“" + line + "”", tw, 3, [46, 40, 36], 700, 1) : null, llh = Lq ? Math.round(Lq.px * 1.3) : 0;
+  const ch = pad + A + 46 + T.lines.length * tlh + 52 + (Lq ? 26 + Lq.lines.length * llh : 0) + 44 + 2 + 34 + 56 + pad - 6;
+  const cy = Math.max(70, Math.round((H - ch) / 2) - 20);
+  // glass card
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 80; ctx.shadowOffsetY = 30; scRound(ctx, cx, cy, cw, ch, 56); ctx.fillStyle = "rgba(30,20,36,.35)"; ctx.fill(); ctx.restore();
+  ctx.save(); scRound(ctx, cx, cy, cw, ch, 56); ctx.clip(); ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fillRect(cx, cy, cw, ch);
+  g = ctx.createLinearGradient(0, cy, 0, cy + 160); g.addColorStop(0, "rgba(255,255,255,.20)"); g.addColorStop(1, "rgba(255,255,255,0)"); ctx.fillStyle = g; ctx.fillRect(cx, cy, cw, 160); ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,.30)"; ctx.lineWidth = 2.5; scRound(ctx, cx + 1, cy + 1, cw - 2, ch - 2, 55); ctx.stroke();
+  // artwork
+  const ax = cx + pad, ay = cy + pad;
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,.4)"; ctx.shadowBlur = 40; ctx.shadowOffsetY = 14; scRound(ctx, ax, ay, A, A, 30); ctx.fillStyle = "#222"; ctx.fill(); ctx.restore();
+  sc2Art(ctx, art, ax, ay, A, A, 30);
+  // text
+  let y = ay + A + 46 + Math.round(T.px * 0.9); ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = sc2Font(700, T.px);
+  for (const l of T.lines) { ctx.fillText(l, ax, y); y += tlh; }
+  y += 52 - tlh + 40; ctx.font = sc2Font(400, 40); ctx.fillStyle = "rgba(255,255,255,.72)"; for (const l of AR) ctx.fillText(l, ax, y);
+  if (Lq) { y += 26 + llh; ctx.font = sc2Font(700, Lq.px, 1); ctx.fillStyle = "#fff"; for (const l of Lq.lines) { ctx.fillText(l, ax, y); y += llh; } y -= llh; }
+  y += 44; ctx.fillStyle = "rgba(255,255,255,.18)"; ctx.fillRect(ax, y, A, 2);
+  // footer row inside the card: logo left, link right
+  y += 34; const bh = 56; sc2Brand(ctx, mark, ax, y, bh, "left");
+  ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.font = sc2Font(700, 32); ctx.fillStyle = "#ff6b80"; ctx.fillText(SC2URL, ax + A, y + bh * 0.56); ctx.textBaseline = "alphabetic";
+  return cv;
+}
+
+
+// ===== v28: Song menu variant D — iOS Liquid Glass (approved) =====
+/* Dhun song ⋯ menu — variant D: iOS 26 Liquid Glass context menu (floating big-art header + heart, 4 glass pills, one glass list with right-side line icons)
+   HOW TO APPLY (site + dhun-android/app/web, keep in sync):
+     1) paste this whole file into app.js just BEFORE the final `})();` (it must sit after the v25 "Song menu, Apple Music style" block — appending at the end does that)
+     2) append variant-D.css to the END of app.css
+     3) bump ?v= in index.html and the SW cache name
+   Do NOT combine with menu variant A/B/C (dhun-menu/variant-*.js) — use exactly one menu variant.
+   Bass Boost is not in the menu (v28 v25Menu already skips it; this also strips a stray row defensively). Speed stays. Every row keeps its
+   original data-s key, so the existing handlers (Telegram, phone download, playlists, lyrics, info, card, artist/album, speed) all still run. */
+
+// ---------- song menu variant D ----------
+const mvOpenTS = openTrackSheet;
+openTrackSheet = function (t) {
+  const r = mvOpenTS.apply(this, arguments);
+  try { mvPost(t); } catch (e) { console.warn("menu D", e); }
+  return r;
+};
+const mvShowS = showSheet; showSheet = function () { mvClear(); return mvShowS.apply(this, arguments); };
+const mvCloseS = closeSheet; closeSheet = function () { mvClear(); return mvCloseS.apply(this, arguments); };
+function mvClear() { sheetBack.classList.remove("mvBk"); sheet.classList.remove("mvD"); sheet.style.removeProperty("--mvT"); sheet.querySelectorAll(".mvBg,.mvGrab").forEach(x => x.remove()); }
+function mvPost(t) {
+  if (!t || sheet.classList.contains("hidden") || !sheet.classList.contains("v25s")) return;
+  const sw = sheet.querySelector("[data-s=v25bass],[data-s=v23bass]"), row = sw && (sw.closest(".v25pr") || sw);
+  if (row) { const g = row.parentElement; row.remove(); if (g && !g.querySelector(".v25pr,button")) g.remove(); }
+  sheet.classList.add("mvD"); sheetBack.classList.add("mvBk");
+  mvIcons(); mvBuild(t);
+}
+// SF-style line icons (stroke = currentColor) for every known row key; unknown/live rows keep their own icon.
+const MVS = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const MVI = {
+  next: MVS('<path d="M4 6h10M4 11h10M4 16h6"/><path d="M16 13.5v6l4.5-3z" fill="currentColor"/>'),
+  last: MVS('<path d="M4 6h16M4 11h16M4 16h9"/><path d="M17 15v5M14.5 17.5h5"/>'),
+  like: MVS('<path d="M12 20s-7.5-4.6-7.5-10.1A4.3 4.3 0 0112 7.3a4.3 4.3 0 017.5 2.6C19.5 15.4 12 20 12 20z"/>'),
+  liked: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 20s-7.5-4.6-7.5-10.1A4.3 4.3 0 0112 7.3a4.3 4.3 0 017.5 2.6C19.5 15.4 12 20 12 20z"/></svg>',
+  share: MVS('<path d="M12 3.5v11M8 7.2l4-3.7 4 3.7"/><path d="M8.5 10.5H7a2 2 0 00-2 2V18a2 2 0 002 2h10a2 2 0 002-2v-5.5a2 2 0 00-2-2h-1.5"/>'),
+  addpl: MVS('<path d="M4 6h11M4 11h11M4 16h7"/><path d="M18 13v7M14.5 16.5h7"/>'),
+  dl: MVS('<path d="M21 4L3 11.2l6.3 2.2L18 7l-6.7 7.6V20l3.4-3.9 3.5 2.6z"/>'),
+  undl: MVS('<path d="M21 4L3 11.2l6.3 2.2L18 7l-6.7 7.6V20l3.4-3.9 3.5 2.6z"/>'),
+  off: MVS('<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M5 19h14"/>'),
+  unoff: MVS('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>'),
+  v23card: MVS('<rect x="4" y="3.5" width="16" height="17" rx="3"/><path d="M8 15l2.6-3 2 2.2L14.5 12 17 15M8 18h8"/><circle cx="9.5" cy="8" r="1.3"/>'),
+  rm: MVS('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>'),
+  rmr: MVS('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>'),
+  radio: MVS('<circle cx="12" cy="12" r="1.8"/><path d="M8.5 15.5a5 5 0 010-7M15.5 8.5a5 5 0 010 7M5.6 18.4a9 9 0 010-12.8M18.4 5.6a9 9 0 010 12.8"/>'),
+  v23info: MVS('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.1"/>'),
+  lyr: MVS('<path d="M5 5.5h14a1.5 1.5 0 011.5 1.5v8a1.5 1.5 0 01-1.5 1.5h-7L7.5 20v-3.5H5A1.5 1.5 0 013.5 15V7A1.5 1.5 0 015 5.5z"/><path d="M8 9.5h8M8 12.5h5"/>'),
+  v25aa: MVS('<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0114 0"/>'),
+  speed: MVS('<path d="M4.5 16a8 8 0 1115 0"/><path d="M12 16l3.5-5"/><circle cx="12" cy="16" r="1.2" fill="currentColor"/>')
+};
+function mvIcons() {
+  sheet.querySelectorAll(".v25r[data-s] .v25i").forEach(i => { const k = i.parentElement.dataset.s; if (MVI[k]) i.innerHTML = MVI[k]; });
+  sheet.querySelectorAll(".v25pr .v25i").forEach(i => { i.innerHTML = MVI.speed; });
+  sheet.querySelectorAll(".v25q[data-s] > i").forEach(i => { const b = i.parentElement, k = b.dataset.s; const ic = k === "like" && b.classList.contains("on") ? MVI.liked : MVI[k]; if (ic) i.innerHTML = ic; });
+}
+// short label of a row (the v25 text, translated already)
+const mvLab = b => { const l = b && b.querySelector(".v25l"); return l ? l.textContent.trim() : ""; };
+
+// D: iOS 26 "Liquid Glass" context menu — floating header (big art + heart), 4 glass pill actions, ONE glass list (label left, line icon right).
+function mvBuild(t) {
+  const w = sheet.querySelector(".v25m"); if (!w) return;
+  const top = w.querySelector(".v25top"), hd = top && top.querySelector(".v25hd"), qa = top && top.querySelector(".v25qa");
+  const like = qa && qa.querySelector("[data-s=like]");
+  if (hd && like) { const s = like.querySelector("span"); like.setAttribute("aria-label", s ? s.textContent : "Love"); if (s) s.remove(); like.classList.add("mvHeart"); hd.appendChild(like); }
+  const pr = w.querySelector(".v25r[data-s=addpl]");
+  if (qa && pr) {
+    const g = pr.parentElement; pr.remove(); if (g && !g.children.length) g.remove();
+    const b = document.createElement("button"); b.className = "v25q"; b.dataset.s = "addpl"; b.setAttribute("data-notr", "");
+    b.innerHTML = `<i>${MVI.addpl}</i><span>${esc(v25L("Playlist", "Playlist", "प्लेलिस्ट"))}</span>`;
+    const sh = qa.querySelector("[data-s=share]"); sh ? qa.insertBefore(b, sh) : qa.appendChild(b);
+  }
+  const gs = [...w.querySelectorAll(":scope > .sgroup.v25g")].filter(g => g.children.length || (g.remove(), 0));
+  if (gs.length) {
+    const L = gs[0]; L.classList.add("mvList");
+    gs.slice(1).forEach(g => { const s = document.createElement("div"); s.className = "mvSep"; L.appendChild(s); while (g.firstChild) L.appendChild(g.firstChild); g.remove(); });
+  }
+}
 
 })();
