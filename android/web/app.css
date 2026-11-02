@@ -457,3 +457,35 @@ button,input,select,textarea{font-family:inherit}
 #jamChatSend{flex:none;width:42px;height:42px;border-radius:21px;background:var(--acc);color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center}
 
 .verTag{font-size:11px;color:var(--sub,#8e8e93);opacity:.7;text-align:right;padding:6px 18px 18px;letter-spacing:.2px}
+/* Terms & Conditions */
+html.tcLock,html.tcLock body{overflow:hidden}
+#tc{position:fixed;inset:0;z-index:9000;background:#000;display:flex;flex-direction:column;padding:var(--st) 0 var(--sb);animation:tcIn .25s ease}
+@keyframes tcIn{from{opacity:0}to{opacity:1}}
+#tc .tcHead{display:flex;align-items:center;gap:12px;padding:16px 20px 12px;border-bottom:.5px solid var(--line)}
+#tc .tcHead img{width:34px;height:34px;object-fit:contain;flex:none}
+#tc .tcHead h2{margin:0;font-size:21px;font-weight:700;line-height:1.15}
+#tc .tcHead small{display:block;color:var(--sub);font-size:12.5px;margin-top:2px}
+#tc .tcBody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:14px 20px 8px}
+#tc .tcIntro{font-size:14.5px;line-height:1.5;margin-bottom:6px}
+#tc .tcSec{background:var(--card);border-radius:14px;padding:12px 14px;margin:10px 0}
+#tc .tcSec h3{margin:0 0 6px;font-size:16px;font-weight:700}
+#tc .tcSec p{margin:0 0 6px;font-size:14px;line-height:1.5}
+#tc .tcEn{display:block;color:var(--sub);font-size:12.5px;line-height:1.45}
+#tc .tcSec p.tcEn{margin:0}
+#tc .tcContact{display:flex;justify-content:center;margin:16px 0 4px}
+#tc .tcEnd{text-align:center;color:var(--sub);font-size:12.5px;padding:10px 0 18px}
+#tc .tcEnd .sig{color:#fff;font-size:18px;font-weight:700;margin-top:4px}
+#tc .tcFoot{padding:10px 20px 14px;border-top:.5px solid var(--line);background:rgba(18,18,20,.96)}
+#tc .tcHint{text-align:center;font-size:13px;color:var(--sub);min-height:18px;margin-bottom:8px}
+#tc .tcHint.ok{color:#5fd38a}
+#tc .tcBtns{display:flex;gap:10px}
+#tc .tcBtns button{flex:1}
+#tc .tcYes,#tc .tcNo{display:block;text-align:center;font:inherit;font-size:16px;font-weight:700;padding:13px 10px;border-radius:12px;border:0;cursor:pointer;text-decoration:none}
+#tc .tcYes{background:var(--acc);color:#fff}
+#tc .tcYes:disabled{background:#3a3a3c;color:#8e8e93;cursor:default}
+#tc .tcNo{background:var(--card2);color:#fff}
+#tc .tcMsg{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:stretch;padding:24px 28px;text-align:center;gap:12px;max-width:440px;margin:0 auto;width:100%;box-sizing:border-box}
+#tc .tcMsg h2{margin:0;font-size:24px}
+#tc .tcMsg p{margin:0;font-size:15px;line-height:1.5}
+#tc .tcBig{font-size:54px}
+.tcChev{font-style:normal;color:var(--sub);font-size:22px;line-height:1}
