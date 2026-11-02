@@ -1,10 +1,10 @@
 {
-  "versionCode": 17,
-  "versionName": "1.0.2",
+  "versionCode": 18,
+  "versionName": "1.0.3",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Naya: Apple jaisi Lyrics, Podcasts, Widget, AutoMix 2, Artist follow, Share card, Speed & Bass Boost, Bhasha: English/Hinglish/Hindi ✨",
+  "notes": "Naya: Apple jaisa song menu (pura dikhega + scroll), Artist & Album ek saath, Bass Boost pe gaane nahi rukenge, Home pe Podcasts, search pe history, Powered by Guru 🛠️",
   "force": false,
-  "size": 4963823,
-  "bytes": 4963823,
-  "sha256": "628ef4b1180e60c41e557197c5216e4c446f029bd790850453f9ef7bf1ee8b79"
+  "size": 4983299,
+  "bytes": 4983299,
+  "sha256": "91193e54ec6487597103dadbf75a549f61140ea09535993e6ba6df2c468a4d8a"
 }
