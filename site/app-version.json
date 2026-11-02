@@ -1,10 +1,10 @@
 {
-  "versionCode": 13,
-  "versionName": "1.0.0",
+  "versionCode": 14,
+  "versionName": "1.0.1",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Bug fixes: song khatam hone pe agla gaana + aur fixes ✅ + AutoMix 🎚️",
+  "notes": "Terms & Conditions screen ✅",
   "force": false,
-  "size": 4879017,
-  "bytes": 4879017,
-  "sha256": "d530ba6160bcf02f4738dd3eef43ad813f0566819a371f1573953d4c07e6fc5b"
+  "size": 4883913,
+  "bytes": 4883913,
+  "sha256": "846cbd06ac18a60c014d5c9a505df79297f253c6a3f0689af6e205197df4a28c"
 }
