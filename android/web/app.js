@@ -3774,4 +3774,264 @@ if (queue[qi]) podUi(true);
 
 try { if (window.__pod) window.__pod.songRate = () => pbRate; } catch (e) {}
 
+
+// ===================== v25 (Dhun 1.0.3): Apple-style song menu (fits + scrolls), Bass Boost never blocks playback, "Powered by Guru" header, podcasts on Home, search history on tap =====================
+const v25L = (en, hg, hi) => appLang === "hi" ? hi : appLang === "hinglish" ? hg : en;
+const v25IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const v25Api = typeof API_BASE === "string" ? API_BASE : "";
+const V25I = {
+  aa: '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 14.5a4.5 4.5 0 110-9 4.5 4.5 0 010 9zm0-5.6a1.1 1.1 0 100 2.2 1.1 1.1 0 000-2.2z"/></svg>',
+  person: '<svg viewBox="0 0 24 24"><path d="M12 12a4.5 4.5 0 100-9 4.5 4.5 0 000 9zm0 2c-3.3 0-9 1.7-9 5v2h18v-2c0-3.3-5.7-5-9-5z"/></svg>',
+  radio: '<svg viewBox="0 0 24 24"><path d="M3.24 6.15A2 2 0 002 8v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2H8.3l8.26-3.34L15.88 1 3.24 6.15zM7 20a3 3 0 110-6 3 3 0 010 6zm13-8h-2v-2h-2v2H4V8h16v4z"/></svg>',
+  info: '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>',
+  lyr: '<svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>',
+  card: '<svg viewBox="0 0 24 24"><path d="M21 19V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z"/></svg>',
+  speed: '<svg viewBox="0 0 24 24"><path d="M20.38 8.57l-1.23 1.85a8 8 0 01-.22 7.58H5.07A8 8 0 0115.58 6.85l1.85-1.23A10 10 0 003.35 19a2 2 0 001.72 1h13.85a2 2 0 001.74-1 10 10 0 00-.27-10.44zm-9.79 6.84a2 2 0 002.83 0l5.66-8.49-8.49 5.66a2 2 0 000 2.83z"/></svg>',
+  bass: '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>',
+  phone: '<svg viewBox="0 0 24 24"><path d="M17 1H7a2 2 0 00-2 2v18a2 2 0 002 2h10a2 2 0 002-2V3a2 2 0 00-2-2zm0 18H7V5h10v14zm-5-2l4-4h-3V8h-2v5H8z"/></svg>',
+};
+
+// ---------- 1) Every sheet fits on screen and scrolls (her iPhone: the long song menu ran under the status bar and couldn't scroll) ----------
+const showSheetV24 = showSheet;
+showSheet = function () { sheet.classList.remove("v25s"); const r = showSheetV24.apply(this, arguments); sheet.scrollTop = 0; return r; };
+const closeSheetV24 = closeSheet;
+closeSheet = function () { sheet.classList.remove("v25s"); return closeSheetV24.apply(this, arguments); };
+
+// ---------- 2) Song menu, Apple Music style ----------
+// Built from the buttons the existing menu chain made (so every handler — Telegram, phone downloads, playlists, info, card — keeps working),
+// re-laid out: header, 4 quick actions, grouped rows with icons on the left, playback controls inline, Cancel pinned at the bottom.
+const openTrackSheetV24 = openTrackSheet;
+openTrackSheet = function (t, ctx, idx) {
+  const r = openTrackSheetV24.apply(this, arguments);
+  try { if (t && !(typeof isPod === "function" && isPod(t))) v25Menu(t, ctx); } catch (e) { console.warn("v25 menu", e); }
+  return r;
+};
+function v25Menu(t, ctx) {
+  if (sheet.classList.contains("hidden")) return;
+  const grp = sheet.querySelector(".sgroup"); if (!grp || grp.classList.contains("cancel")) return;
+  const btns = [...grp.querySelectorAll(":scope > button[data-s]")];
+  const used = new Set(), take = k => { const b = btns.find(x => x.dataset.s === k && !used.has(x)); if (b) used.add(b); return b; };
+  const img = grp.querySelector(".shead img"), art = img ? img.getAttribute("src") : "";
+  const liked = isLiked(t.id), jam = typeof jamOn === "function" && jamOn();
+  const qa = (k, ico, label, on) => `<button class="v25q${on ? " on" : ""}" data-s="${k}" data-notr><i>${ico}</i><span>${esc(label)}</span></button>`;
+  const row = (k, ico, label, o = {}) => `<button class="v25r${o.cls ? " " + o.cls : ""}" data-s="${k}" data-notr><i class="v25i">${ico}</i><span class="v25l">${esc(label)}</span>${o.chev ? '<b class="v25c">›</b>' : ""}</button>`;
+  let qh = "";
+  if (take("next")) qh += qa("next", ICON.playNext, v25L("Play Next", "Next chalao", "अगला चलाएँ"));
+  if (take("last")) qh += qa("last", ICON.queue, v25L("Play Last", "Last me", "आख़िर में"));
+  if (take("like")) qh += qa("like", liked ? ICON.heart : ICON.heartO, liked ? v25L("Loved", "Liked", "पसंद है") : v25L("Love", "Love", "पसंद"), liked);
+  if (take("share")) qh += qa("share", ICON.share, v25L("Share", "Share", "शेयर"));
+  const sub = [t.artist, t.album && t.album !== t.title ? t.album : ""].filter(Boolean).join(" · ");
+  const groups = [];
+  const ar = take("artist"), al = take("album");
+  if (ar || al) groups.push(row("v25aa", ar && al ? V25I.aa : ar ? V25I.person : V25I.aa, ar && al ? v25L("Artist & Album", "Artist & Album", "कलाकार और एल्बम") : ar ? v25L("Go to Artist", "Artist dekho", "कलाकार देखें") : v25L("Go to Album", "Album dekho", "एल्बम देखें"), { chev: 1 }));
+  let g = "";
+  if (take("radio")) g += row("radio", V25I.radio, v25L("Start Radio", "Radio shuru karo", "रेडियो शुरू करें"));
+  if (take("v23info")) g += row("v23info", V25I.info, v25L("Song Info", "Song info", "गाने की जानकारी"), { chev: 1 });
+  if (take("lyr")) g += row("lyr", V25I.lyr, v25L("Lyrics", "Lyrics", "बोल"));
+  if (g) groups.push(g);
+  g = "";
+  if (take("addpl")) g += row("addpl", ICON.pl, v25L("Add to Playlist", "Playlist me daalo", "प्लेलिस्ट में जोड़ें"), { chev: 1 });
+  const tail = [], danger = [];
+  const KNOWN = { dl: [TGICON, () => v25L("Download to Telegram", "Telegram pe download", "टेलीग्राम पर डाउनलोड")], undl: [TGICON, () => v25L("Remove from Telegram", "Telegram se hatao", "टेलीग्राम से हटाएँ"), "danger"],
+    off: [V25I.phone, () => v25L("Download to Phone", "Phone me download", "फ़ोन में डाउनलोड")], unoff: [V25I.phone, () => v25L("Remove from Phone", "Phone se hatao", "फ़ोन से हटाएँ"), "danger"],
+    v23card: [V25I.card, () => v25L("Share Card", "Share card", "शेयर कार्ड")], rm: [ICON.trash, () => v25L("Remove from Playlist", "Playlist se hatao", "प्लेलिस्ट से हटाएँ"), "danger", 1],
+    rmr: [ICON.trash, () => v25L("Remove from History", "History se hatao", "इतिहास से हटाएँ"), "danger", 1] };
+  let speedB = null, bassB = null;
+  for (const b of btns) {
+    if (used.has(b)) continue; used.add(b); const k = b.dataset.s;
+    if (k === "v23speed") { speedB = b; continue; }
+    if (k === "v23bass") { bassB = b; continue; }
+    const kn = KNOWN[k];
+    if (kn) { (kn[3] ? danger : tail).push(row(k, kn[0], kn[1](), { cls: kn[2] || "" })); continue; }
+    b.classList.add("v25r", "v25carry"); tail.push(b); // anything else (e.g. "Sending to Telegram… / Downloading 45%") moves over as-is, live labels intact
+  }
+  let pb = "";
+  if (speedB || bassB) {
+    const opts = [0.75, 1, 1.25, 1.5]; if (!opts.some(r => Math.abs(r - pbRate) < 0.001)) { opts.push(pbRate); opts.sort((a, b) => a - b); }
+    if (speedB) pb += `<div class="v25pr${jam ? " off" : ""}"><i class="v25i">${V25I.speed}</i><span class="v25l" data-notr>${esc(v25L("Speed", "Speed", "स्पीड"))}</span><div class="v25seg">${opts.map(r => `<button data-s="v25rate" data-r="${r}" class="${!jam && Math.abs(r - pbRate) < 0.001 || jam && r === 1 ? "on" : ""}" data-notr>${rateLabel(r)}</button>`).join("")}</div></div>`;
+    if (bassB) pb += `<div class="v25pr"><i class="v25i">${V25I.bass}</i><span class="v25l" data-notr>${esc(v25L("Bass Boost", "Bass Boost", "बेस बूस्ट"))}</span><button class="v25sw${bassOn() ? " on" : ""}" data-s="v25bass" role="switch" aria-checked="${bassOn()}" aria-label="Bass Boost"></button></div>`;
+  }
+  const cancel = sheet.querySelector(".sgroup.cancel");
+  const wrap = document.createElement("div"); wrap.className = "v25m";
+  wrap.innerHTML = `<div class="sgroup v25top"><div class="v25hd"><img src="${esc(art || "/icon-192.png")}" alt="" onerror="this.onerror=null;this.src='/icon-192.png'"><div class="v25ht"><div class="t1">${esc(t.title)}</div><div class="sub">${esc(sub)}</div></div></div>${qh ? `<div class="v25qa">${qh}</div>` : ""}</div>`
+    + groups.map(x => `<div class="sgroup v25g">${x}</div>`).join("")
+    + (g || tail.length ? `<div class="sgroup v25g v25tail">${g}</div>` : "")
+    + (pb ? `<div class="sgroup v25g v25pbg">${pb}</div>` : "")
+    + (danger.length ? `<div class="sgroup v25g">${danger.join("")}</div>` : "");
+  const tg = wrap.querySelector(".v25tail");
+  if (tg) for (const x of tail) { if (typeof x === "string") tg.insertAdjacentHTML("beforeend", x); else tg.appendChild(x); }
+  sheet.innerHTML = ""; sheet.appendChild(wrap); if (cancel) sheet.appendChild(cancel);
+  sheet.classList.add("v25s"); wrap.scrollTop = 0;
+  const oc = sheet.onclick;
+  sheet.onclick = e => {
+    const b = e.target.closest("[data-s]"); const k = b && b.dataset.s;
+    if (k === "v25aa") { closeSheet(); setTimeout(() => v25ArtistAlbum(t, !!ar, !!al), 40); return; }
+    if (k === "v25rate") { if (jam) return toast(tr("Listen Together me speed 1× rehti hai")); setRate(+b.dataset.r); sheet.querySelectorAll("[data-s=v25rate]").forEach(x => x.classList.toggle("on", x === b)); return; }
+    if (k === "v25bass") { bassToggle(); b.classList.toggle("on", bassOn()); b.setAttribute("aria-checked", String(bassOn())); return; }
+    return oc && oc(e);
+  };
+}
+// "View album and view artist ek karo": one row; with both, a small chooser (album first, then each artist)
+function v25ArtistAlbum(t, hasAr, hasAl) {
+  const names = hasAr ? artistNames(t.artist) : [];
+  const goAl = () => { closeNP(); collOpen("als:" + t.id); }, goAr = n => { closeNP(); collOpen("arn:" + n); };
+  if (hasAl && !names.length) return goAl();
+  if (!hasAl && names.length === 1) return goAr(names[0]);
+  showSheet(`<div class="sgroup v25g v25ch"><div class="shead"><div><div class="t1">${esc(t.title)}</div><div class="sub">${esc(v25L("Go to", "Kahan jaana hai?", "कहाँ जाएँ?"))}</div></div></div>
+    ${hasAl ? `<button class="v25r" data-s="al" data-notr><i class="v25i">${V25I.aa}</i><span class="v25l">${esc(v25L("Album", "Album", "एल्बम"))}${t.album ? `<small>${esc(t.album)}</small>` : ""}</span><b class="v25c">›</b></button>` : ""}
+    ${names.map((n, i) => `<button class="v25r" data-s="a" data-i="${i}" data-notr><i class="v25i">${V25I.person}</i><span class="v25l">${esc(v25L("Artist", "Artist", "कलाकार"))}<small>${esc(n)}</small></span><b class="v25c">›</b></button>`).join("")}</div>`, { al: goAl, a: b => goAr(names[+b.dataset.i]) });
+}
+
+// ---------- 3) Bass Boost / EQ never blocks a song ----------
+// Web Audio only hears a source that is CORS-clean (same origin, our /api proxy, aac.saavncdn.com). Anything else is proxied or played plain.
+// On iPhone an AudioContext made without a tap stays suspended = silence, so: one context reused across songs, created/resumed only on a tap,
+// and a watchdog: if the routed song is silent (suspended context or CORS-zeroed output) for 5 s, it switches to the plain player at the same spot.
+const v25Src = new WeakMap(); let v25NoEqId = "", v25InLoad = 0, v25Sil = 0, v25LastT = -1, v25NoteId = "";
+const v25CorsOK = u => { u = String(u || ""); if (!u || /^(blob:|data:)/.test(u)) return true; if (u[0] === "/" && u[1] !== "/") return true; try { const x = new URL(u, location.href); return x.origin === location.origin || (x.protocol === "https:" && /(^|\.)aac\.saavncdn\.com$/.test(x.hostname)) || (!!v25Api && u.indexOf(v25Api + "/api/") === 0); } catch (e) { return false; } };
+const v25Proxyable = u => { try { return /(^|\.)(saavncdn\.com|googlevideo\.com)$/.test(new URL(u).hostname); } catch (e) { return false; } };
+function v25Note(why) {
+  const t = queue[qi], id = t ? t.id : ""; if (v25NoteId === id) return; v25NoteId = id;
+  toast(v25L("Bass Boost isn't available for this song — playing normally 🎵", "Bass Boost is gaane pe available nahi — normal chal raha hai 🎵", "इस गाने पर बेस बूस्ट उपलब्ध नहीं — सामान्य चल रहा है 🎵"), 3400);
+  window.__v25.lastBypass = { why, id, at: Date.now() };
+}
+eqRoute = function () {
+  const t = queue[qi];
+  if (t && t.id !== v25NoEqId && v25NoEqId && !eqRouted) v25NoEqId = "";
+  if (t && t.id === v25NoEqId) return false; // this song plays without Web Audio
+  if (eqRouted && v25Src.has(audio)) { if (actx && actx.state !== "running") actx.resume().catch(() => {}); return true; }
+  const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false;
+  const gesture = !navigator.userActivation || navigator.userActivation.isActive;
+  if (actx && actx.state === "closed") actx = null;
+  if (!actx) {
+    if (v25IOS && !gesture) return false; // made without a tap it would stay silent on iPhone: play plain until the next tap
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+    try { actx = new AC(); } catch (e) { actx = null; return false; }
+    preGain = actx.createGain();
+    eqNodes = EQF.map((f, i) => { const b = actx.createBiquadFilter(); b.type = eqType(i); b.frequency.value = f; b.Q.value = 1.1; return b; });
+    analyser = actx.createAnalyser(); analyser.fftSize = 2048;
+    let n = preGain; for (const b of eqNodes) { n.connect(b); n = b; } n.connect(analyser); analyser.connect(actx.destination);
+  }
+  if (actx.state !== "running") { actx.resume().catch(() => {}); if (v25IOS && !gesture) return false; }
+  const cur = audio.getAttribute("src") || "";
+  const hadSrc = !!cur && !/^blob:|^\//.test(cur) && audio.crossOrigin !== "anonymous";
+  const was = !audio.paused, at = audio.currentTime;
+  try { audio.crossOrigin = "anonymous"; const s = actx.createMediaElementSource(audio); s.connect(preGain); v25Src.set(audio, s); } catch (e) { console.warn("eq route", e); return false; }
+  eqRouted = true; v25Sil = 0; eqApply();
+  if (hadSrc && !v25InLoad && queue[qi] && mode === "audio") loadCurrent(was, at); // reload CORS-clean so the EQ can hear it
+  return true;
+};
+function v25Swap() { // fresh plain <audio> (the routed one can't be un-routed); the AudioContext is kept for the next song
+  const old = audio;
+  const a = document.createElement("audio"); a.setAttribute("playsinline", ""); a.preload = "auto"; a.id = "audio";
+  old.onerror = null; old.onplaying = null; try { old.pause(); old.removeAttribute("src"); old.load(); } catch (e) {}
+  try { const s = v25Src.get(old); if (s) s.disconnect(); } catch (e) {}
+  if (old.parentNode) old.replaceWith(a); else document.body.appendChild(a);
+  audio = a; wireAudio(a); eqRouted = false; v25Sil = 0; v25LastT = -1;
+  const t = queue[qi]; v25NoEqId = t ? t.id : "";
+}
+function v25Bypass(why) {
+  if (!eqRouted) return;
+  const was = !audio.paused && mode === "audio" && !userPaused, at = audio.currentTime;
+  v25Swap();
+  if (queue[qi] && mode === "audio") loadCurrent(was, at); else syncPlay();
+  v25Note(why);
+}
+const loadCurrentV24 = loadCurrent;
+loadCurrent = function () {
+  const t = queue[qi]; if (t && v25NoEqId && t.id !== v25NoEqId) v25NoEqId = "";
+  v25InLoad++; try { return loadCurrentV24.apply(this, arguments); } finally { v25InLoad--; }
+};
+const playUrlV24 = playUrl;
+playUrl = function (t, url, my, autoplay, startAt, attempt) {
+  try {
+    if (eqRouted && url && !v25CorsOK(url)) {
+      if (v25Proxyable(url)) url = v25Api + "/api/p?u=" + encodeURIComponent(url); // CORS pass-through: Bass Boost keeps working
+      else { v25Swap(); v25Note("src"); } // unknown host: play it plain
+    }
+  } catch (e) {}
+  return playUrlV24.call(this, t, url, my, autoplay, startAt, attempt);
+};
+if (typeof playYT === "function") { const playYTV24 = playYT; playYT = function () { if (eqOn) v25Note("yt"); return playYTV24.apply(this, arguments); }; }
+["touchend", "click", "keydown"].forEach(ev => document.addEventListener(ev, () => { if (eqOn && actx && actx.state !== "running" && actx.state !== "closed") actx.resume().catch(() => {}); }, true));
+const v25Buf = new Uint8Array(1024);
+setInterval(() => {
+  if (!eqRouted || mode !== "audio" || !audio || audio.paused || !analyser || !actx) { v25Sil = 0; v25LastT = -1; return; }
+  const ct = audio.currentTime, adv = v25LastT >= 0 && ct > v25LastT + 0.2; v25LastT = ct;
+  let bad = false;
+  if (actx.state !== "running") { actx.resume().catch(() => {}); bad = audio.readyState >= 2 || adv; }
+  else if (adv && ct > 1.5) { try { analyser.getByteTimeDomainData(v25Buf); bad = v25Buf.every(v => v === 128); } catch (e) {} }
+  v25Sil = bad ? v25Sil + 1 : 0;
+  if (v25Sil >= 5) v25Bypass(actx.state !== "running" ? "ctx" : "silent");
+}, 1000);
+
+// ---------- 4) Home header: "Powered by Guru" + gear inside the logo row ----------
+function v25Home() {
+  if (curTab !== "home" || subView) return;
+  let bb = view.querySelector(":scope > .brandBar"); const h1 = view.querySelector(":scope > h1.hrow");
+  if (!bb && h1) { h1.insertAdjacentHTML("beforebegin", `<div class="brandBar"><img src="/logo-h2.webp?v=23" alt="Dhun" width="90" height="36"></div>`); bb = view.querySelector(":scope > .brandBar"); } // the app had no logo row
+  if (bb && h1 && !h1.classList.contains("v25pbh")) {
+    const gear = h1.querySelector(".gear");
+    bb.classList.add("v25bb"); if (gear && !bb.querySelector(".gear")) bb.appendChild(gear);
+    h1.classList.add("v25pbh"); h1.setAttribute("data-notr", ""); h1.setAttribute("aria-label", "Powered by Guru");
+    h1.innerHTML = `<span class="v25by">Powered by</span> <span class="v25guru">Guru</span>`;
+  }
+  v25PodHome();
+}
+// ---------- 5) Home: Continue listening (podcasts) + Recommended Podcasts 🎙️ ----------
+function v25PodRec() {
+  const rows = (podHome && podHome.rows) || []; const seen = new Set(), out = [];
+  const pri = rows.filter(r => /hindi|india|q:/i.test((r.key || "") + " " + (r.title || ""))); const use = pri.length ? pri : rows;
+  for (let i = 0; i < 20 && out.length < 14; i++) for (const r of use) { const s = r.items && r.items[i]; if (s && s.id && !seen.has(String(s.id))) { seen.add(String(s.id)); out.push(s); } }
+  return out;
+}
+function v25PodHome() {
+  if (curTab !== "home" || subView || typeof podHome === "undefined") return;
+  if (!podHome && typeof podLoadHome === "function") podLoadHome();
+  const rec = v25PodRec(); let cont = "";
+  try { cont = podContHTML(); } catch (e) {}
+  let h = "";
+  if (cont) h += cont.replace(/<button class="podX"[^>]*>✕<\/button>/g, "").replace(/<h2>([^<]*)<\/h2>/, (m, x) => `<h2>🎙️ ${x}</h2>`);
+  if (rec.length) h += `<h2>${esc(v25L("Recommended Podcasts 🎙️", "Recommended Podcasts 🎙️", "सुझाए गए पॉडकास्ट 🎙️"))} <a data-pod="home" data-notr>${esc(v25L("See All", "Sab dekho", "सभी देखें"))}</a></h2><div class="podCar">${rec.map(s => podTileHTML(s)).join("")}</div>`;
+  let box = view.querySelector(":scope > .v25pod");
+  if (!h) { if (box) box.remove(); return; }
+  if (box && box.dataset.h === String(h.length) + (queue[qi] ? queue[qi].id : "")) return;
+  if (!box) {
+    box = document.createElement("div"); box.className = "v25pod";
+    const shelves = [...view.querySelectorAll(":scope > h2")].filter(x => x.querySelector("a[data-q]"));
+    const ref = shelves[1] || shelves[0] || null; // after the first music shelf, so music stays first
+    if (ref) view.insertBefore(box, ref); else view.appendChild(box);
+  }
+  box.dataset.h = String(h.length) + (queue[qi] ? queue[qi].id : ""); box.innerHTML = h;
+}
+const renderHomeV24 = renderHome;
+renderHome = function () { const r = renderHomeV24.apply(this, arguments); try { v25Home(); } catch (e) { console.warn("v25 home", e); } return r; };
+if (typeof podRefresh === "function") { const podRefreshV24 = podRefresh; podRefresh = function () { const r = podRefreshV24.apply(this, arguments); try { if (curTab === "home" && !subView) v25PodHome(); } catch (e) {} return r; }; }
+new MutationObserver(() => { if (curTab === "home" && !subView) { const h1 = view.querySelector(":scope > h1.hrow"); if (h1 && !h1.classList.contains("v25pbh")) v25Home(); } }).observe(view, { childList: true });
+try { v25Home(); } catch (e) {}
+
+// ---------- 6) Search: tap the search bar → recent searches drop down (even while results are showing) ----------
+function v25HistShow() {
+  const q = $("#q"), bar = view.querySelector(".searchBar"); if (!q || !bar || !searches.length) return v25HistHide();
+  const s = searchState; if (!s.q && !(s.typing && q.value.trim())) return v25HistHide(); // empty page already lists them
+  if (q.value.trim() && q.value.trim() !== s.q) return v25HistHide(); // typing: suggestions take over
+  let box = bar.querySelector(".v25hist");
+  const h = `<div class="v25hh"><b>${esc(tr("Recent Searches"))}</b><a data-v25h="clear">${esc(tr("Clear all"))}</a></div>${searches.slice(0, 8).map((x, i) => `<div class="v25hr"><button data-v25h="go" data-i="${i}">${ICON.clock}<span>${esc(x)}</span></button><button class="v25hx" data-v25h="rm" data-i="${i}" aria-label="Remove">✕</button></div>`).join("")}`;
+  if (!box) { box = document.createElement("div"); box.className = "v25hist"; bar.appendChild(box); }
+  box.innerHTML = h;
+}
+function v25HistHide() { const b = view.querySelector(".v25hist"); if (b) b.remove(); }
+view.addEventListener("focusin", e => { if (e.target && e.target.id === "q") v25HistShow(); });
+view.addEventListener("input", e => { if (e.target && e.target.id === "q") { if (!e.target.value.trim() || e.target.value.trim() === searchState.q) v25HistShow(); else v25HistHide(); } });
+view.addEventListener("focusout", e => { if (e.target && e.target.id === "q") setTimeout(() => { if (document.activeElement && document.activeElement.id === "q") return; v25HistHide(); }, 350); });
+view.addEventListener("pointerdown", e => { if (e.target.closest(".v25hist")) e.preventDefault(); }, true); // keep the keyboard/focus while tapping a row
+view.addEventListener("click", e => {
+  const b = e.target.closest("[data-v25h]"); if (!b) return; e.preventDefault(); e.stopPropagation();
+  const k = b.dataset.v25h, i = +b.dataset.i;
+  if (k === "go") { const x = searches[i]; v25HistHide(); const q = $("#q"); if (q) q.blur(); if (x) doSearch(x); return; }
+  if (k === "rm") { searches.splice(i, 1); store.set("searches", searches); return searches.length ? v25HistShow() : v25HistHide(); }
+  if (k === "clear") { searches = []; store.set("searches", searches); v25HistHide(); if (!searchState.q) renderSearchBody(); }
+}, true);
+
+window.__v25 = { _ctx: () => actx, _play: url => playUrl(queue[qi], url, loadToken, true, 0, 0), menu: v25Menu, corsOK: v25CorsOK, bypass: v25Bypass, home: v25Home, podRec: v25PodRec, hist: v25HistShow, st: () => ({ eqOn, eqRouted, ctx: actx && actx.state, noEq: v25NoEqId, sil: v25Sil, src: audio && audio.getAttribute("src"), co: audio && audio.crossOrigin }) };
+
 })();
