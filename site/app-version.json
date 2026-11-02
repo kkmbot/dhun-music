@@ -1,10 +1,10 @@
 {
-  "versionCode": 18,
-  "versionName": "1.0.3",
+  "versionCode": 19,
+  "versionName": "1.0.4",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Naya: Apple jaisa song menu (pura dikhega + scroll), Artist & Album ek saath, Bass Boost pe gaane nahi rukenge, Home pe Podcasts, search pe history, Powered by Guru 🛠️",
+  "notes": "Naya design ✨ Browse tiles, Top Charts/Mood Mixes cards, iPhone jaisa glass song menu (Bass Boost ab sirf EQ me), naya Share Card",
   "force": false,
-  "size": 4983299,
-  "bytes": 4983299,
-  "sha256": "91193e54ec6487597103dadbf75a549f61140ea09535993e6ba6df2c468a4d8a"
+  "size": 4991775,
+  "bytes": 4991775,
+  "sha256": "57da339c8deebcb2dd8cffb96cd4e6030becc7e5e62f84937fce38ecdbd7f295"
 }
