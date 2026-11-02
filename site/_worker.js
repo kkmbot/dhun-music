@@ -767,7 +767,7 @@ async function resumeBroadcast(env, ctx) {
 const APK_PATH = "dhun.apk";
 let SUPPORT_TG = "Memer_guru"; // Telegram handle shown as support contact in bot messages (env SUPPORT_TG)
 const LINKS = site => `🌐 Web app (iPhone / any phone): ${site}\n📱 Android app (offline download bhi): ${site}${APK_PATH}\n\n💬 Support: @${SUPPORT_TG}`;
-const LINK_BTNS = site => ({ parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "🌐 Open Dhun", url: site }, { text: "📱 Android App", url: site + APK_PATH }]] } });
+const LINK_BTNS = site => ({ parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "🌐 Open Dhun", url: site }, { text: "📱 Android App", url: site + APK_PATH }], [{ text: "📢 Updates Channel", url: "https://t.me/rg_botz" }]] } });
 const WELCOME = (n, site = SITE) => `Namaste..! 🎶 <b>Dhun connected</b> ✅\n\nAb app me jo bhi song <b>Download</b> karoge, wo yahin is chat me aa jayega. Phone storage use nahi hoga, Telegram me safe rahega.\n\nAapke liked songs, playlists aur history bhi aapke account me save rahenge — kisi bhi phone pe connect karo, sab wapas aa jayega.\n\n${LINKS(site)}`;
 const HELLO = (site = SITE) => `Namaste..! 🎶 Main <b>Dhun</b> ka bot hoon.\n\nSongs yahan paane ke liye Dhun app kholo → Library → "Connect Telegram".\n\n${LINKS(site)}`;
 async function tgHook(env, req, ctx) {
@@ -1319,12 +1319,227 @@ async function jamRoute(p, req, env, u) {
   return J({ ok: false }, 404);
 }
 
+
+// ================= v23: song info · follow artists (new-release alerts on the bot) =================
+async function songInfoOf(id) {
+  const k = "si:" + id; const h = memGet(k); if (h) return h;
+  const j = await sv("song.getDetails", { pids: id }); const x = j.songs ? j.songs[0] : j[id]; if (!x) throw new Error("not found");
+  const m = x.more_info || {}, am = m.artistMap || {}, all = [...(am.artists || []), ...(am.primary_artists || []), ...(am.featured_artists || [])];
+  const by = role => { const seen = new Set(), out = []; for (const a of all) { if (!a || String(a.role || "").toLowerCase() !== role) continue; const nm = ent(a.name).trim(); if (!nm || seen.has(nm)) continue; seen.add(nm); out.push({ id: String(a.id || ""), name: nm }); } return out; };
+  const crew = new Set([...by("music"), ...by("lyricist")].map(a => a.name));
+  let singers = by("singer"); if (!singers.length) { const pa = (am.primary_artists || []).concat(am.featured_artists || []).map(a => ({ id: String(a.id || ""), name: ent(a.name).trim() })).filter((a, i, l) => a.name && l.findIndex(b => b.name === a.name) === i); singers = pa.filter(a => !crew.has(a.name)); if (!singers.length) singers = pa; }
+  let music = by("music"); if (!music.length && m.music) music = ent(m.music).split(",").map(s => ({ id: "", name: s.trim() })).filter(a => a.name);
+  const o = { id, title: ent(x.title || x.song || ""), album: ent(m.album || ""), albumId: String(m.album_id || ""), year: x.year || "", release_date: m.release_date || "", label: ent(m.label || ""), language: x.language || "", duration: +m.duration || 0, play_count: +x.play_count || 0, copyright: ent(m.copyright_text || ""), singers, music, lyricists: by("lyricist"), starring: by("starring").slice(0, 6), image: arImg(x.image, "500x500") };
+  memSet(k, o, 6 * 3600); return o;
+}
+let folReady = null;
+function folDb(env) { const d = env.DB; if (!folReady) folReady = d.batch([d.prepare("CREATE TABLE IF NOT EXISTS fol (cid TEXT, aid TEXT, name TEXT, at INTEGER, PRIMARY KEY (cid, aid))"), d.prepare("CREATE INDEX IF NOT EXISTS fol_aid ON fol (aid)")]).catch(e => { folReady = null; throw e; }); return folReady.then(() => d); }
+async function userFollow(env, ctx, body) {
+  const d = await db(env); const u = await userOf(d, body.c, ctx);
+  if (!u || !u.chat_id || !u.linked) return J({ error: "not_linked" }, 401);
+  const f = await folDb(env), cid = String(u.chat_id);
+  if (body.op === "put" && Array.isArray(body.list)) {
+    const list = body.list.filter(a => a && /^\d{1,12}$/.test(String(a.id))).slice(0, 300);
+    const st = [f.prepare("DELETE FROM fol WHERE cid = ?").bind(cid)];
+    for (const a of list) st.push(f.prepare("INSERT OR REPLACE INTO fol (cid, aid, name, at) VALUES (?, ?, ?, ?)").bind(cid, String(a.id), String(a.name || "").slice(0, 120), Date.now()));
+    await f.batch(st);
+  }
+  const r = await f.prepare("SELECT aid, name FROM fol WHERE cid = ? ORDER BY at DESC").bind(cid).all();
+  return J({ ok: true, list: (r.results || []).map(x => ({ id: x.aid, name: x.name })) });
+}
+async function artistReleases(aid) { // newest releases (albums / singles) of one artist
+  const d = await sv("artist.getArtistPageDetails", { artistId: aid, n_song: "1", n_album: "1", page: "0", sort_order: "desc", category: "latest" });
+  const rel = (d.latest_release || []).concat(d.singles || []).filter(x => x && /^\d+$/.test(String(x.id)));
+  const seen = new Set(), out = [];
+  for (const x of rel) { if (seen.has(x.id)) continue; seen.add(x.id); out.push({ id: String(x.id), title: ent(x.title || ""), image: arImg(x.image, "500x500"), year: x.year || "", artist: ent(x.subtitle || "").split(" - ")[0] }); }
+  out.sort((a, b) => +b.id - +a.id);
+  return { name: ent(d.name || ""), image: arImg(d.image, "500x500"), rel: out.slice(0, 8) };
+}
+async function followNew(env, ctx, body) {
+  const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(String).filter(x => /^\d{1,12}$/.test(x)))].slice(0, 60);
+  if (!ids.length) return J({ items: [], artists: [] });
+  const d = await db(env); const now = Date.now(), items = [], artists = [], todo = [];
+  let budget = 6; // artists refreshed per call (the rest come from stored state; every artist is re-checked at most once per 6 h)
+  for (const aid of ids) {
+    let st = null; try { const v = await kvGet(d, "far:" + aid); if (v) st = JSON.parse(v); } catch (e) {}
+    if ((!st || now - st.at > 6 * 3600e3) && budget > 0) {
+      budget--;
+      try {
+        const r = await artistReleases(aid); const max = st ? +st.max || 0 : 0;
+        const fresh = st && max ? r.rel.filter(x => +x.id > max) : []; // first look at an artist only sets the baseline
+        const nmax = Math.max(max, ...r.rel.map(x => +x.id));
+        const seenAt = Object.assign({}, (st && st.seenAt) || {}); for (const x of fresh) seenAt[x.id] = now;
+        for (const k of Object.keys(seenAt)) if (now - seenAt[k] > 30 * 864e5) delete seenAt[k];
+        st = { at: now, max: nmax, name: r.name, image: r.image, rel: r.rel, seenAt };
+        await kvSet(d, "far:" + aid, JSON.stringify(st));
+        if (fresh.length) todo.push({ aid, name: r.name, fresh: fresh.slice(0, 3) });
+      } catch (e) { if (st) { st.at = now - 5 * 3600e3; try { await kvSet(d, "far:" + aid, JSON.stringify(st)); } catch (e2) {} } }
+    }
+    if (st) { artists.push({ id: aid, name: st.name, image: st.image }); for (const x of st.rel || []) items.push({ ...x, aid, aname: st.name, isNew: !!(st.seenAt && st.seenAt[x.id] && now - st.seenAt[x.id] < 14 * 864e5) }); }
+  }
+  if (todo.length) ctx.waitUntil(followNotify(env, todo).catch(() => {}));
+  items.sort((a, b) => (b.isNew - a.isNew) || (+b.id - +a.id));
+  const seen = new Set(); const out = items.filter(x => !seen.has(x.id) && seen.add(x.id)).slice(0, 24);
+  return J({ items: out, artists });
+}
+async function followNotify(env, todo) {
+  const d = await db(env), f = await folDb(env);
+  for (const a of todo) {
+    const r = await f.prepare("SELECT cid FROM fol WHERE aid = ? LIMIT 500").bind(a.aid).all(); const cids = (r.results || []).map(x => x.cid);
+    if (!cids.length) continue;
+    for (const rel of a.fresh) {
+      const dk = "fan:" + a.aid + ":" + rel.id; if (await kvGet(d, dk)) continue; await kvSet(d, dk, String(Date.now()));
+      let song = null; try { const al = await svAlbum(rel.id); song = al.items && al.items[0]; } catch (e) {}
+      const link = song ? SITE + "?song=" + encodeURIComponent(song.id) : SITE + "?al=" + rel.id;
+      const html = `⭐ <b>${escH(a.name)}</b> ka naya gaana aaya! 🎶\n\n🎵 <b>${escH(song ? song.title : rel.title)}</b>${song && song.artist ? "\n👤 " + escH(song.artist) : ""}\n\n▶️ Dhun pe suno: ${link}`;
+      for (let i = 0; i < cids.length; i += 20) await Promise.all(cids.slice(i, i + 20).map(cid => tg("sendMessage", { chat_id: cid, text: html, parse_mode: "HTML", disable_web_page_preview: false }).catch(() => {})));
+    }
+  }
+}
+const escH = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// ---------- 🎙️ Podcasts (Apple Podcasts directory + the show's own public RSS feed) ----------
+const POD_UA = { "user-agent": "Mozilla/5.0 (Dhun Podcasts; +https://dhun.sites.tab.bot)", accept: "application/rss+xml, application/xml, text/xml, */*" };
+const POD_GENRES = { comedy: [1303, "😂 Comedy"], society: [1324, "🧑‍🤝‍🧑 Society & Culture"], education: [1304, "📚 Education"], spiritual: [1314, "🙏 Dharm & Spirituality"], crime: [1488, "🕵️ True Crime"], kids: [1305, "🧸 Kids & Family"], health: [1512, "💪 Health"], business: [1321, "💼 Business"], arts: [1301, "🎭 Arts"], sports: [1545, "🏏 Sports"], news: [1489, "📰 News"], history: [1487, "🏛️ History"] };
+const POD_ROWS = [["top", "🇮🇳 Top India"], ["q:hindi podcast", "🎙️ Hindi Podcasts"], ["q:hindi kahaniyan", "📖 Hindi Kahaniyan"], ["q:bollywood podcast", "🎬 Bollywood"], ["g:comedy"], ["g:spiritual"], ["q:hindi motivation", "🔥 Motivation"], ["g:crime"]];
+async function podCached(key, sec, fn) {
+  const m = memGet("pod:" + key); if (m) return m;
+  const ck = new Request("https://dhun.sites.tab.bot/__cache/pod1/" + encodeURIComponent(key));
+  try { const c = await caches.default.match(ck); if (c) { const v = await c.json(); memSet("pod:" + key, v, Math.min(sec, 600)); return v; } } catch (e) {}
+  const v = await fn();
+  if (v && !v.error) { memSet("pod:" + key, v, Math.min(sec, 600)); try { await caches.default.put(ck, new Response(JSON.stringify(v), { headers: { "content-type": "application/json", "cache-control": "public, max-age=" + sec } })); } catch (e) {} }
+  return v;
+}
+const podArt = (u, s = 600) => String(u || "").replace(/\/\d+x\d+(bb)?\.(jpg|jpeg|png|webp)$/i, `/${s}x${s}bb.jpg`);
+const podShowOf = r => ({ id: String(r.collectionId || r.id || ""), title: r.collectionName || r.name || "", author: r.artistName || "", image: podArt(r.artworkUrl600 || r.artworkUrl100 || ""), feed: r.feedUrl || "", genre: r.primaryGenreName || (r.genres && r.genres[0] && (r.genres[0].name || r.genres[0])) || "" });
+async function podSearch(q, limit = 30) {
+  if (!q) return { items: [] };
+  const r = await tfetch(`https://itunes.apple.com/search?media=podcast&entity=podcast&country=IN&limit=${limit}&term=${encodeURIComponent(q)}`, {}, 8000);
+  if (!r.ok) throw new Error("search " + r.status);
+  const d = await r.json();
+  return { items: (d.results || []).filter(x => x.collectionId && x.feedUrl).map(podShowOf) };
+}
+async function podChartRss(gid) {
+  const r = await tfetch(`https://itunes.apple.com/in/rss/toppodcasts/limit=50${gid ? "/genre=" + gid : ""}/json`, {}, 8000);
+  const d = await r.json(); const es = (d.feed && d.feed.entry) || [];
+  return (Array.isArray(es) ? es : [es]).map(e => ({ id: String(e.id && e.id.attributes && e.id.attributes["im:id"] || ""), title: (e["im:name"] || {}).label || "", author: (e["im:artist"] || {}).label || "", image: podArt(((e["im:image"] || []).slice(-1)[0] || {}).label || ""), feed: "", genre: (e.category && e.category.attributes && e.category.attributes.label) || "" })).filter(x => x.id);
+}
+async function podChart(genre) {
+  if (genre && POD_GENRES[genre]) { try { return await podChartRss(POD_GENRES[genre][0]); } catch (e) { return await podChartRss(POD_GENRES[genre][0]); } }
+  try {
+    const r = await tfetch("https://rss.marketingtools.apple.com/api/v2/in/podcasts/top/50/podcasts.json", {}, 8000);
+    const d = await r.json(); const out = ((d.feed && d.feed.results) || []).map(podShowOf).filter(x => x.id);
+    if (out.length) return out;
+  } catch (e) {}
+  return podChartRss(0);
+}
+async function podTop(genre) {
+  if (genre) return podCached("top:" + genre, 6 * 3600, async () => ({ items: (genre.startsWith("q:") ? (await podSearch(genre.slice(2), 30)).items : await podChart(genre)) }));
+  return podCached("home", 6 * 3600, async () => {
+    const rows = await Promise.all(POD_ROWS.map(async ([k, title]) => {
+      try {
+        const g = k.startsWith("g:") ? k.slice(2) : k === "top" ? "" : null;
+        const items = g !== null ? await podChart(g) : (await podSearch(k.slice(2), 25)).items;
+        return { key: g ? g : k, title: title || (POD_GENRES[g] || [])[1] || k, items: items.slice(0, 25) };
+      } catch (e) { return null; }
+    }));
+    const out = rows.filter(r => r && r.items.length);
+    return out.length ? { rows: out, genres: Object.entries(POD_GENRES).map(([k, v]) => ({ key: k, title: v[1] })) } : { error: "no rows" };
+  });
+}
+function podHostOk(u) {
+  let x; try { x = new URL(u); } catch (e) { return false; }
+  if (!/^https?:$/.test(x.protocol) || x.username || x.password) return false;
+  const h = x.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (!h.includes(".") || /(^|\.)(localhost|local|internal|lan|home|intranet|corp)$/.test(h)) return false;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) { const [a, b] = h.split(".").map(Number); if (a === 10 || a === 127 || a === 0 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127)) return false; }
+  if (h.includes(":")) return false; // raw IPv6 literal
+  return true;
+}
+async function podFetchSafe(url, opt = {}, ms = 10000) { // follows redirects itself so every hop is checked
+  let u = url;
+  for (let i = 0; i < 6; i++) {
+    if (!podHostOk(u)) throw new Error("feed host not allowed");
+    const r = await tfetch(u, { ...opt, redirect: "manual" }, ms);
+    if (r.status >= 300 && r.status < 400 && r.headers.get("location")) { u = new URL(r.headers.get("location"), u).href; continue; }
+    return r;
+  }
+  throw new Error("too many redirects");
+}
+async function podReadCapped(r, cap = 5 * 1024 * 1024) {
+  if (!r.body || !r.body.getReader) return (await r.text()).slice(0, cap);
+  const rd = r.body.getReader(), dec = new TextDecoder("utf-8"); let s = "", n = 0;
+  for (;;) { const { done, value } = await rd.read(); if (done) break; n += value.length; s += dec.decode(value, { stream: true }); if (n >= cap) { try { rd.cancel(); } catch (e) {} break; } }
+  return s + dec.decode();
+}
+const POD_ENT = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", hellip: "…", mdash: "—", ndash: "–", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", copy: "©", reg: "®", trade: "™" };
+const podDec = s => String(s || "").replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e) => e[0] === "#" ? (() => { try { return String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : +e.slice(1)); } catch (x) { return m; } })() : (POD_ENT[e.toLowerCase()] ?? m));
+const podCdata = s => String(s || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (m, x) => x);
+const podPlain = (s, max) => { let t = podCdata(s); if (/&lt;/.test(t) && !/</.test(t)) t = podDec(t); t = t.replace(/<(br|\/p|\/div|\/li|\/h\d)\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " "); t = podDec(t).replace(/[ \t\r\f\v\u00a0]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim(); return max && t.length > max ? t.slice(0, max - 1).replace(/\s+\S*$/, "") + "…" : t; };
+const podTag = (x, tag) => { const m = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, "i").exec(x); return m ? m[1] : ""; };
+const podAttr = (x, tag, attr) => { const m = new RegExp(`<${tag}\\s[^>]*?\\b${attr}\\s*=\\s*("([^"]*)"|'([^']*)')`, "i").exec(x); return m ? podDec(m[2] ?? m[3] ?? "") : ""; };
+const podText = (x, tag) => podDec(podCdata(podTag(x, tag))).replace(/\s+/g, " ").trim();
+const podDur = s => { s = String(s || "").trim(); if (!s) return 0; if (/^\d+(\.\d+)?$/.test(s)) return Math.round(+s); const p = s.split(":").map(Number); if (p.some(isNaN)) return 0; return Math.round(p.reduce((a, b) => a * 60 + b, 0)); };
+const podH36 = s => { let h1 = 5381, h2 = 52711; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = (h1 * 33) ^ c; h2 = (h2 * 33) ^ c; } return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36); };
+function podParse(xml, max = 300) {
+  const first = xml.search(/<item[\s>]/i), ch = first > 0 ? xml.slice(0, first) : xml;
+  const chImg = podAttr(ch, "itunes:image", "href") || podText(podTag(ch, "image"), "url");
+  const show = { title: podText(ch, "title"), author: podText(ch, "itunes:author") || podText(ch, "managingEditor"), image: chImg, description: podPlain(podTag(ch, "description") || podTag(ch, "itunes:summary"), 1500) };
+  const eps = []; const re = /<item[\s>][\s\S]*?<\/item>/gi; let m;
+  while ((m = re.exec(xml)) && eps.length < 2000) {
+    const it = m[0], url = podAttr(it, "enclosure", "url"); if (!url || !/^https?:\/\//i.test(url)) continue;
+    const type = podAttr(it, "enclosure", "type"); if (type && /^(video|image|text)\//i.test(type) && !/mp4|m4v/i.test(type)) continue;
+    const guid = podText(it, "guid") || url, date = Date.parse(podText(it, "pubDate") || podText(it, "dc:date")) || 0;
+    eps.push({ guid, k: podH36(guid), title: podText(it, "title") || "Episode", date, dur: podDur(podText(it, "itunes:duration")), url, image: podAttr(it, "itunes:image", "href") || "", desc: podPlain(podTag(it, "description") || podTag(it, "itunes:summary") || podTag(it, "content:encoded"), 400) });
+  }
+  eps.sort((a, b) => b.date - a.date);
+  show.episodes = eps.slice(0, max);
+  return show;
+}
+async function podShow(id, feed) {
+  if (id && !/^\d{1,15}$/.test(id)) return { error: "bad id" };
+  return podCached("show:" + (id || podH36(feed || "")), 3600, async () => {
+    let meta = { id: id || "", title: "", author: "", image: "", feed: feed || "", genre: "" };
+    if (id) { try { const r = await tfetch(`https://itunes.apple.com/lookup?id=${id}&entity=podcast&country=IN`, {}, 8000); const d = await r.json(); const x = (d.results || []).find(z => z.collectionId) || null; if (x) meta = { ...podShowOf(x), feed: feed || x.feedUrl || "" }; } catch (e) {} }
+    if (!meta.feed) return { error: "no feed" };
+    if (!podHostOk(meta.feed)) return { error: "feed host not allowed" };
+    const r = await podFetchSafe(meta.feed, { headers: POD_UA }, 12000);
+    if (!r.ok) return { error: "feed " + r.status };
+    const s = podParse(await podReadCapped(r));
+    if (!s.episodes.length && !s.title) return { error: "feed unreadable" };
+    return { id: meta.id, title: meta.title || s.title, author: meta.author || s.author, image: meta.image || s.image, description: s.description, feed: meta.feed, genre: meta.genre, episodes: s.episodes };
+  });
+}
+async function podAudio(req, t) { // CORS + range pass-through for episode audio: http:// files on the https site / app, and the equalizer (Web Audio needs CORS)
+  if (!podHostOk(t)) return J({ error: "host not allowed" }, 403);
+  const hd = { "user-agent": POD_UA["user-agent"] }; const rg = req.headers.get("range"); if (rg) hd.range = rg;
+  const r = await podFetchSafe(t, { headers: hd }, 20000);
+  const ct = r.headers.get("content-type") || "";
+  if (r.ok && ct && !/^(audio|video)\/|octet-stream|binary|mpeg|x-m4a/i.test(ct)) return J({ error: "not audio" }, 415);
+  const out = new Headers();
+  for (const k of ["content-type", "content-length", "content-range", "accept-ranges"]) { const v = r.headers.get(k); if (v) out.set(k, v); }
+  out.set("access-control-allow-origin", "*"); out.set("cache-control", "no-store");
+  return new Response(r.body, { status: r.status, headers: out });
+}
+async function podRoute(p, req, u) {
+  const sp = u.searchParams;
+  if (p === "/api/pod/search") { const q = (sp.get("q") || "").trim().slice(0, 120); if (!q) return J({ items: [] }); try { return J(await podCached("s:" + q.toLowerCase(), 3 * 3600, () => podSearch(q)), 200, 1800); } catch (e) { return J({ items: [], error: "search failed" }, 502); } }
+  if (p === "/api/pod/top") { const g = (sp.get("genre") || "").slice(0, 60); if (g && !POD_GENRES[g] && !g.startsWith("q:")) return J({ error: "bad genre" }, 400); try { const v = await podTop(g); return J(v, v.error ? 502 : 200, v.error ? 0 : 3600); } catch (e) { return J({ rows: [], error: "chart failed" }, 502); } }
+  if (p === "/api/pod/show") { const f = sp.get("feed") || ""; try { const v = await podShow(sp.get("id") || "", f); return J(v, v.error ? 502 : 200, v.error ? 0 : 1800); } catch (e) { return J({ error: String(e && e.message || e).slice(0, 120) }, 502); } }
+  if (p === "/api/pod/a") return podAudio(req, sp.get("u") || "");
+  return J({ error: "not found" }, 404);
+}
+
 export default {
   async fetch(req, env, ctx) {
     loadConfig(env, req);
     const u = new URL(req.url), p = u.pathname, q = (u.searchParams.get("q") || "").slice(0, 200), v = u.searchParams.get("v") || "", id = u.searchParams.get("id") || "";
     try {
+      if (p === "/api/songinfo") { if (!/^[\w-]{3,40}$/.test(id)) return J({ error: "bad id" }, 400); try { return J(await songInfoOf(id), 200, 21600); } catch (e) { return J({ error: 1 }); } }
+      if (p === "/api/u/follow") return await userFollow(env, ctx, await impBody(req));
+      if (p === "/api/follow/new") { try { return await followNew(env, ctx, req.method === "POST" ? await impBody(req) : { ids: (u.searchParams.get("ids") || "").split(",") }); } catch (e) { return J({ items: [], artists: [] }); } }
       if (p.startsWith("/api/jam/")) return await jamRoute(p, req, env, u); // Listen Together
+      if (p.startsWith("/api/pod/")) return await podRoute(p, req, u); // 🎙️ Podcasts
       if (p === "/api/u/hist") return await userHist(env, ctx, await impBody(req)); // per-user listening history (signed-in)
       if (p.startsWith("/api/tg/") || p.startsWith("/api/u/")) return await tgRoute(p, req, env, u, ctx);
       if (p === "/api/app-version") { // Android in-app updater; values live in /app-version.json (edit that file + swap /dhun.apk to ship a new version)

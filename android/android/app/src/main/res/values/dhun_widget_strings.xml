@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dhun_widget_label">Dhun</string>
+    <string name="dhun_widget_description">Gaana chalao, roko, aage-peeche — bina app khole</string>
+    <string name="dhun_widget_empty_title">Dhun</string>
+    <string name="dhun_widget_empty_sub">Gaana chalao 🎵</string>
+    <string name="dhun_widget_prev">Previous</string>
+    <string name="dhun_widget_next">Next</string>
+    <string name="dhun_widget_toggle">Play / Pause</string>
+    <string name="dhun_widget_open">Open Dhun</string>
+</resources>

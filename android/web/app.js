@@ -1173,6 +1173,8 @@ if (NATIVE) {
   if (CapApp) CapApp.addListener("backButton", () => {
     if (!sheet.classList.contains("hidden")) return closeSheet();
     if (np.classList.contains("open")) return closeNP();
+    if (window.__pod && window.__pod.back()) return;
+    if (document.getElementById("v23voice")) { document.getElementById("v23voice").remove(); return; }
     if (curTab === "library" && subView) { subView = null; return rerender(); }
     if (curTab !== "home") return go("home");
     CapApp.minimizeApp(); // keep the music playing instead of closing the app
@@ -2326,4 +2328,1450 @@ document.addEventListener("visibilitychange", () => {
 });
 setInterval(() => { if (!document.hidden) { const el = view.querySelector("[data-greet]"); if (el && !el.classList.contains(greetData().k)) greetPaint(); } }, 60000);
 window.__v22 = { greetData, get lyrOpen() { return lyrOpenNow; }, lyrToggle };
+
+// ================= v23: language · Apple-style lyrics · AutoMix 2 · song info · follow · share card · queue edit · speed · voice search · widget =================
+const V23_API = typeof API_BASE === "string" ? API_BASE : "";
+const V23_NATIVE = typeof NATIVE !== "undefined" && !!NATIVE;
+const capP = n => { try { const C = window.Capacitor; return C && C.Plugins && C.isNativePlatform && C.isNativePlatform() ? C.Plugins[n] || null : null; } catch (e) { return null; } };
+const reduceMotion = () => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } };
+
+// ---------- 1) App language: Hinglish (default) / हिन्दी / English ----------
+// One string table, applied to every UI text node / placeholder / aria-label as the app renders (so every screen, sheet and toast follows).
+// Song titles, artist names, lyrics, chat and other content are never touched.
+const LANGS = [["en", "English"], ["hinglish", "Hinglish"], ["hi", "हिन्दी"]];
+let appLang = store.get("lang", "en"); if (!LANGS.some(l => l[0] === appLang)) appLang = "en"; // English is the default for anyone who never picked
+const I18N = new Map();
+const I18N_TABLE = `Listen Now|अभी सुनें|Listen Now
+Search|खोजें|Search
+Library|लाइब्रेरी|Library
+Settings|सेटिंग्स|Settings
+Account|अकाउंट|Account
+Back|वापस|Back
+Cancel|रद्द करें|Cancel
+Close|बंद करें|Close
+Clear|साफ़ करें|Clear
+Next|अगला|Next
+Previous|पिछला|Previous
+Play|चलाएँ|Play
+Play/Pause|चलाएँ/रोकें|Play/Pause
+Like|पसंद|Like
+Love|पसंद करें|Love
+Unlike|पसंद हटाएँ|Unlike
+More|और|More
+Repeat|रिपीट|Repeat
+Shuffle|शफ़ल|Shuffle
+Shuffle on|शफ़ल चालू|Shuffle on
+Shuffle off|शफ़ल बंद|Shuffle off
+Download|डाउनलोड|Download
+Songs|गाने|Songs
+Albums|एल्बम|Albums
+Artists|कलाकार|Artists
+Playlists|प्लेलिस्ट|Playlists
+Browse|ब्राउज़ करें|Browse
+See All|सब देखें|See All
+Top Picks|टॉप पसंद|Top Picks
+Top Picks For You|आपके लिए टॉप पसंद|Top Picks For You
+For You|आपके लिए|For You
+Playlists for You|आपके लिए प्लेलिस्ट|Playlists for You
+Recently Played|हाल ही में सुने|Recently Played
+Recent Searches|हाल की खोजें|Recent Searches
+Liked Songs|पसंदीदा गाने|Liked Songs
+Telegram Downloads|टेलीग्राम डाउनलोड|Telegram Downloads
+New Playlist…|नई प्लेलिस्ट…|New Playlist…
+Import Playlist|प्लेलिस्ट इम्पोर्ट करें|Import Playlist
+Your Recap|आपका रीकैप|Your Recap
+Week · Month · Year|हफ़्ता · महीना · साल|Week · Month · Year
+Songs, artists, lyrics|गाने, कलाकार, बोल|Songs, artists, lyrics
+Search YouTube instead|YouTube पर खोजें|Search YouTube instead
+Not the version you wanted?|यह वर्ज़न नहीं चाहिए?|Not the version you wanted?
+Playing Next|आगे बजेगा|Playing Next
+Up Next|आगे|Up Next
+Autoplay on|ऑटोप्ले चालू|Autoplay on
+Nothing up next — similar songs get added automatically.|आगे कुछ नहीं — मिलते-जुलते गाने अपने आप जुड़ेंगे।|Nothing up next — similar songs get added automatically.
+Play Next|अगला चलाएँ|Play Next
+Play Last|आख़िर में चलाएँ|Play Last
+Add to Playlist…|प्लेलिस्ट में जोड़ें…|Add to Playlist…
+Add to Playlist|प्लेलिस्ट में जोड़ें|Add to Playlist
+Share Song|गाना शेयर करें|Share Song
+Download to Telegram|टेलीग्राम पर डाउनलोड करें|Download to Telegram
+Remove from Telegram|टेलीग्राम से हटाएँ|Remove from Telegram
+Remove from Playlist|प्लेलिस्ट से हटाएँ|Remove from Playlist
+Remove from Recently Played|हाल ही में सुने से हटाएँ|Remove from Recently Played
+Remove from Queue|क्यू से हटाएँ|Remove from Queue
+Move to Top|सबसे ऊपर करें|Move to Top
+Sending to Telegram…|टेलीग्राम पर भेज रहे हैं…|Sending to Telegram…
+Download to phone|फ़ोन में डाउनलोड करें|Download to phone
+Download to phone (offline)|फ़ोन में डाउनलोड (ऑफ़लाइन)|Download to phone (offline)
+Remove from phone|फ़ोन से हटाएँ|Remove from phone
+Download All to phone|सब फ़ोन में डाउनलोड करें|Download All to phone
+Download All to Telegram|सब टेलीग्राम पर डाउनलोड करें|Download All to Telegram
+Downloaded|डाउनलोड किए गए|Downloaded
+Downloaded songs|डाउनलोड किए गाने|Downloaded songs
+Downloading…|डाउनलोड हो रहा है…|Downloading…
+Downloading to phone…|फ़ोन में डाउनलोड हो रहा है…|Downloading to phone…
+Delete Playlist|प्लेलिस्ट हटाएँ|Delete Playlist
+Rename|नाम बदलें|Rename
+Open Playlist|प्लेलिस्ट खोलें|Open Playlist
+Add to Library|लाइब्रेरी में जोड़ें|Add to Library
+Added to queue|क्यू में जोड़ा|Added to queue
+Playing next|अगला बजेगा|Playing next
+Removed|हटा दिया|Removed
+Link copied|लिंक कॉपी हुआ|Link copied
+Added to Liked Songs ♥|पसंदीदा गानों में जोड़ा ♥|Added to Liked Songs ♥
+Removed from Liked Songs|पसंदीदा गानों से हटाया|Removed from Liked Songs
+Loading…|लोड हो रहा है…|Loading…
+Finding song…|गाना ढूँढ रहे हैं…|Finding song…
+Tap play to start|शुरू करने के लिए प्ले दबाएँ|Tap play to start
+Trying another quality…|दूसरी क्वालिटी आज़मा रहे हैं…|Trying another quality…
+This song couldn't play|यह गाना नहीं चल सका|This song couldn't play
+This song can't play right now — skipping|यह गाना अभी नहीं चल रहा — अगला चला रहे हैं|This song can't play right now — skipping
+Not on the main source — trying YouTube…|मुख्य स्रोत पर नहीं — YouTube आज़मा रहे हैं…|Not on the main source — trying YouTube…
+Playing via YouTube player — keep the app open for this one|YouTube प्लेयर से चल रहा है — इसके लिए ऐप खुला रखें|Playing via YouTube player — keep the app open for this one
+You're offline|आप ऑफ़लाइन हैं|You're offline
+You're offline.|आप ऑफ़लाइन हैं।|You're offline.
+You're offline — Dhun needs internet|आप ऑफ़लाइन हैं — Dhun को इंटरनेट चाहिए|You're offline — Dhun needs internet
+Dhun needs internet to play. Your downloaded songs are safe in Telegram.|Dhun चलाने के लिए इंटरनेट चाहिए। आपके डाउनलोड किए गाने टेलीग्राम में सुरक्षित हैं।|Dhun needs internet to play. Your downloaded songs are safe in Telegram.
+Your downloaded songs still play.|आपके डाउनलोड किए गाने फिर भी चलेंगे।|Your downloaded songs still play.
+Open Downloaded ›|डाउनलोड किए खोलें ›|Open Downloaded ›
+Check your connection and try again.|कनेक्शन देखकर फिर कोशिश करें।|Check your connection and try again.
+Streaming quality|स्ट्रीमिंग क्वालिटी|Streaming quality
+On Wi‑Fi|वाई-फ़ाई पर|On Wi‑Fi
+On mobile data|मोबाइल डेटा पर|On mobile data
+Data saver mode|डेटा सेवर मोड|Data saver mode
+Data saver|डेटा सेवर|Data saver
+Use the mobile data quality right now|अभी मोबाइल डेटा वाली क्वालिटी इस्तेमाल करें|Use the mobile data quality right now
+Playing now at:|अभी चल रहा है:|Playing now at:
+Download quality|डाउनलोड क्वालिटी|Download quality
+Equalizer|इक्वलाइज़र|Equalizer
+Reset to Flat|फ़्लैट पर रीसेट करें|Reset to Flat
+Custom|कस्टम|Custom
+Off|बंद|Off
+AutoMix off|ऑटोमिक्स बंद|AutoMix off
+AutoMix on 🎚️|ऑटोमिक्स चालू 🎚️|AutoMix on 🎚️
+AutoMix 🎚️|ऑटोमिक्स 🎚️|AutoMix 🎚️
+Gaane ek dusre me mix hote hain, Apple Music jaise. Kitna mix, Dhun har gaane ke hisaab se khud decide karta hai|गाने एक-दूसरे में मिक्स होते हैं, Apple Music जैसे। कितना मिक्स, Dhun हर गाने के हिसाब से ख़ुद तय करता है|Songs blend into each other, like Apple Music. Dhun decides how much to mix for every song
+iPhone browser me AutoMix nahi chal sakta (Safari volume change nahi karne deta) — gaane normal tarike se badlenge.|iPhone ब्राउज़र में ऑटोमिक्स नहीं चल सकता (Safari वॉल्यूम बदलने नहीं देता) — गाने सामान्य तरीक़े से बदलेंगे।|AutoMix can't run in the iPhone browser (Safari doesn't allow volume changes) — songs will change normally.
+Listen Together me AutoMix band rehta hai, taaki sabka gaana ek saath chale.|लिसन टुगेदर में ऑटोमिक्स बंद रहता है, ताकि सबका गाना एक साथ चले।|AutoMix stays off in Listen Together, so everyone's song stays in sync.
+Connect Telegram|टेलीग्राम जोड़ें|Connect Telegram
+Sign in with Telegram|टेलीग्राम से साइन इन करें|Sign in with Telegram
+Signed in with Telegram ✅|टेलीग्राम से साइन इन ✅|Signed in with Telegram ✅
+Not signed in|साइन इन नहीं|Not signed in
+Log out|लॉग आउट|Log out
+Sync now|अभी सिंक करें|Sync now
+Synced ✅|सिंक हो गया ✅|Synced ✅
+Couldn't sync, check internet|सिंक नहीं हुआ, इंटरनेट देखें|Couldn't sync, check internet
+Connected|जुड़ा हुआ|Connected
+Save your likes & playlists to your own account, get them back on any phone|अपनी पसंद और प्लेलिस्ट अपने अकाउंट में सेव करें, किसी भी फ़ोन पर वापस पाएँ|Save your likes & playlists to your own account, get them back on any phone
+Until you connect, everything stays only on this phone.|जोड़ने तक सब कुछ सिर्फ़ इसी फ़ोन पर रहेगा।|Until you connect, everything stays only on this phone.
+Open Telegram|टेलीग्राम खोलें|Open Telegram
+Open in Telegram|टेलीग्राम में खोलें|Open in Telegram
+Created with|बनाया गया|Created with
+Support &amp; Love|सपोर्ट और प्यार|Support & Love
+Support & Love|सपोर्ट और प्यार|Support & Love
+Contact us|संपर्क करें|Contact us
+Deals channel|डील्स चैनल|Deals channel
+Join Deals channel|डील्स चैनल जॉइन करें|Join Deals channel
+Join Deals channel 🛍️|डील्स चैनल जॉइन करें 🛍️|Join Deals channel 🛍️
+Daily deals|रोज़ की डील्स|Daily deals
+Best shopping deals, daily · on Telegram|सबसे अच्छी शॉपिंग डील्स, रोज़ · टेलीग्राम पर|Best shopping deals, daily · on Telegram
+Install app|ऐप इंस्टॉल करें|Install app
+Add to Home Screen|होम स्क्रीन पर जोड़ें|Add to Home Screen
+Make it an app:|इसे ऐप बनाएँ:|Make it an app:
+Listen Together|साथ में सुनें|Listen Together
+Start Listen Together|साथ में सुनना शुरू करें|Start Listen Together
+Listen Together chat|साथ में सुनें — चैट|Listen Together chat
+Listen Together live 🎧|साथ में सुनें लाइव 🎧|Listen Together live 🎧
+Stop Listen Together (sabke liye)|साथ में सुनना बंद करें (सबके लिए)|Stop Listen Together (for everyone)
+Leave (sirf main)|छोड़ें (सिर्फ़ मैं)|Leave (just me)
+Sirf main nikalun (Leave)|सिर्फ़ मैं निकलूँ|Just me (Leave)
+Haan, sabke liye band karo|हाँ, सबके लिए बंद करें|Yes, stop for everyone
+Listen Together band karein?|साथ में सुनना बंद करें?|Stop Listen Together?
+Join karo 🎧|जॉइन करें 🎧|Join 🎧
+Join|जॉइन|Join
+Start|शुरू|Start
+Send|भेजें|Send
+Chat|चैट|Chat
+💬 Chat|💬 चैट|💬 Chat
+Close chat|चैट बंद करें|Close chat
+Copy link|लिंक कॉपी करें|Copy link
+Session code|सेशन कोड|Session code
+Aapka naam|आपका नाम|Your name
+Naam likho|नाम लिखें|Type your name
+Pehle apna naam likho|पहले अपना नाम लिखें|Type your name first
+Message likho…|मैसेज लिखें…|Type a message…
+Message nahi gaya, dobara bhejo|मैसेज नहीं गया, फिर भेजें|Message not sent, send again
+Abhi koi message nahi. Kuch likho — sab ko dikhega 👋|अभी कोई मैसेज नहीं। कुछ लिखें — सबको दिखेगा 👋|No messages yet. Write something — everyone will see it 👋
+Dost ko ye code ya link bhejo|दोस्त को यह कोड या लिंक भेजें|Send this code or link to a friend
+ya code se join karo|या कोड से जॉइन करें|or join with a code
+Sun rahe hain|सुन रहे हैं|Listening
+Sab koi gaana badal, pause, aage-peeche kar sakta hai|कोई भी गाना बदल, रोक, आगे-पीछे कर सकता है|Anyone can change, pause or skip the song
+Dosto ke saath ek hi gaana, ek hi time pe — kahin bhi ho, koi bhi phone ho. Sab gaana badal / pause kar sakte hain.|दोस्तों के साथ एक ही गाना, एक ही समय पर — कहीं भी हों, कोई भी फ़ोन हो। सब गाना बदल / रोक सकते हैं।|The same song at the same moment with friends — anywhere, any phone. Everyone can change / pause it.
+Sheet band kar do to bhi chalta rahega|शीट बंद करने पर भी चलता रहेगा|Keeps going even if you close this sheet
+Ye Listen Together session khatam ho gaya|यह साथ में सुनने का सेशन ख़त्म हो गया|This Listen Together session has ended
+Session start nahi hua, internet check karo|सेशन शुरू नहीं हुआ, इंटरनेट देखें|Couldn't start the session, check your internet
+Listen Together: internet slow hai…|साथ में सुनें: इंटरनेट धीमा है…|Listen Together: internet is slow…
+Listen Together: connection slow, retry ho raha hai…|साथ में सुनें: कनेक्शन धीमा, फिर कोशिश हो रही है…|Listen Together: connection slow, retrying…
+Listen Together se nikal gaye — gaana aapke phone pe chalta rahega|साथ में सुनने से निकल गए — गाना आपके फ़ोन पर चलता रहेगा|You left Listen Together — the song keeps playing on your phone
+Listen Together band kar diya (sabke liye) — gaana aapke phone pe chalta rahega|साथ में सुनना बंद (सबके लिए) — गाना आपके फ़ोन पर चलता रहेगा|Listen Together stopped (for everyone) — the song keeps playing on your phone
+Sabki queue shuffle ho gayi|सबकी क्यू शफ़ल हो गई|Everyone's queue was shuffled
+Sabki queue me add ho gaya 🎧|सबकी क्यू में जुड़ गया 🎧|Added to everyone's queue 🎧
+Sabke liye next me laga diya 🎧|सबके लिए अगला लगा दिया 🎧|Playing next for everyone 🎧
+Queue khali hai — koi gaana chalao|क्यू ख़ाली है — कोई गाना चलाएँ|Queue is empty — play a song
+Station nahi mila, internet check karo|स्टेशन नहीं मिला, इंटरनेट देखें|Couldn't find a station, check your internet
+📻 Radio shuru karo|📻 रेडियो शुरू करें|📻 Start radio
+📻 Radio shuru ho raha hai…|📻 रेडियो शुरू हो रहा है…|📻 Starting radio…
+Album dekho|एल्बम देखें|View album
+Artist dekho:|कलाकार देखें:|View artist:
+Kis artist ka page kholna hai?|किस कलाकार का पेज खोलना है?|Which artist's page?
+Sab chalao|सब चलाएँ|Play all
+Gaane abhi nahi mil paaye 😕|गाने अभी नहीं मिल पाए 😕|Couldn't load songs right now 😕
+Internet check karke dobara try karo.|इंटरनेट देखकर फिर कोशिश करें।|Check your internet and try again.
+Internet nahi hai, check karke dobara try karo.|इंटरनेट नहीं है, देखकर फिर कोशिश करें।|No internet, check and try again.
+Dobara try karo|फिर कोशिश करें|Try again
+Try again|फिर कोशिश करें|Try again
+🔥 Top Charts|🔥 टॉप चार्ट्स|🔥 Top Charts
+😊 Mood Mixes|😊 मूड मिक्स|😊 Mood Mixes
+Top 50|टॉप 50|Top 50
+Aaj ke hits|आज के हिट्स|Today's hits
+😴 Sleep timer|😴 स्लीप टाइमर|😴 Sleep timer
+Sleep timer|स्लीप टाइमर|Sleep timer
+Sleep timer band|स्लीप टाइमर बंद|Sleep timer off
+Timer band karo|टाइमर बंद करें|Turn off timer
+Gaana khatam hone pe|गाना ख़त्म होने पर|End of song
+😴 Ye gaana khatam hote hi music band|😴 यह गाना ख़त्म होते ही संगीत बंद|😴 Music stops when this song ends
+😴 Sleep timer: music band. Good night!|😴 स्लीप टाइमर: संगीत बंद। शुभ रात्रि!|😴 Sleep timer: music stopped. Good night!
+😴 Gaana khatam — music band. Good night!|😴 गाना ख़त्म — संगीत बंद। शुभ रात्रि!|😴 Song over — music stopped. Good night!
+😴 Sleep timer: Listen Together se nikal ke music band kiya|😴 स्लीप टाइमर: साथ में सुनने से निकलकर संगीत बंद किया|😴 Sleep timer: left Listen Together and stopped the music
+🎤 Lyrics ke liye photo pe tap karo|🎤 बोल देखने के लिए फ़ोटो पर टैप करें|🎤 Tap the photo for lyrics
+🎤 Lyrics|🎤 बोल|🎤 Lyrics
+Lyrics la raha hoon…|बोल ला रहे हैं…|Loading lyrics…
+Lyrics nahi mile 😕|बोल नहीं मिले 😕|No lyrics found 😕
+Pehle koi gaana chalao|पहले कोई गाना चलाएँ|Play a song first
+Lyrics dikhao|बोल दिखाएँ|Show lyrics
+Photo dikhao|फ़ोटो दिखाएँ|Show photo
+Abhi recap khaali hai|अभी रीकैप ख़ाली है|Your recap is empty for now
+Most-played day|सबसे ज़्यादा सुना गया दिन|Most-played day
+Top Songs|टॉप गाने|Top Songs
+Top Artists|टॉप कलाकार|Top Artists
+Top language|टॉप भाषा|Top language
+minutes listened|मिनट सुने|minutes listened
+new discoveries|नई खोजें|new discoveries
+Share my Recap|मेरा रीकैप शेयर करें|Share my Recap
+Recap image saved 📸|रीकैप फ़ोटो सेव हुई 📸|Recap image saved 📸
+Your Week in Dhun 🎧|Dhun में आपका हफ़्ता 🎧|Your Week in Dhun 🎧
+Import|इम्पोर्ट|Import
+Paste|पेस्ट|Paste
+Aur import karo|और इम्पोर्ट करें|Import more
+Spotify ya Apple Music se|Spotify या Apple Music से|From Spotify or Apple Music
+Pehle playlist ka link paste karo|पहले प्लेलिस्ट का लिंक पेस्ट करें|Paste the playlist link first
+Paste nahi hua, link khud paste karo|पेस्ट नहीं हुआ, लिंक ख़ुद पेस्ट करें|Couldn't paste, paste the link yourself
+Playlist khol rahe hain…|प्लेलिस्ट खोल रहे हैं…|Opening playlist…
+Abhi playlist load nahi ho payi, thodi der me try karo.|अभी प्लेलिस्ट लोड नहीं हो पाई, थोड़ी देर में कोशिश करें।|Couldn't load the playlist, try again in a bit.
+For You refresh ho raha hai…|आपके लिए रिफ़्रेश हो रहा है…|Refreshing For You…
+Refresh|रिफ़्रेश|Refresh
+Abhi chalao|अभी चलाएँ|Play now
+Next me lagao|अगला लगाएँ|Play next
+Queue se hatao|क्यू से हटाएँ|Remove from queue
+Mix|मिक्स|Mix
+Check for updates|अपडेट देखें|Check for updates
+Checking for updates…|अपडेट देख रहे हैं…|Checking for updates…
+Already up to date ✅|पहले से अपडेटेड ✅|Already up to date ✅
+Naya update available 🎉|नया अपडेट उपलब्ध 🎉|New update available 🎉
+Update now|अभी अपडेट करें|Update now
+Update|अपडेट|Update
+Baad me|बाद में|Later
+Couldn't check for updates, try later|अपडेट नहीं देख पाए, बाद में कोशिश करें|Couldn't check for updates, try later
+About|जानकारी|About
+Settings kholo|सेटिंग्स खोलें|Open Settings
+Delete all phone downloads|फ़ोन के सारे डाउनलोड हटाएँ|Delete all phone downloads
+All phone downloads deleted|फ़ोन के सारे डाउनलोड हटा दिए|All phone downloads deleted
+Removed from phone|फ़ोन से हटाया|Removed from phone
+Already on your phone ✓|पहले से फ़ोन में है ✓|Already on your phone ✓
+All already on your phone ✓|सब पहले से फ़ोन में हैं ✓|All already on your phone ✓
+Already in your Telegram ✓|पहले से टेलीग्राम में है ✓|Already in your Telegram ✓
+All already in your Telegram ✓|सब पहले से टेलीग्राम में हैं ✓|All already in your Telegram ✓
+In your Telegram ✓|टेलीग्राम में है ✓|In your Telegram ✓
+Telegram pe bhej diya ✅|टेलीग्राम पर भेज दिया ✅|Sent to Telegram ✅
+Couldn't reach the server, try again|सर्वर से संपर्क नहीं हुआ, फिर कोशिश करें|Couldn't reach the server, try again
+Couldn't remove, check internet|हटा नहीं पाए, इंटरनेट देखें|Couldn't remove, check internet
+Logged out. Your library is safe in your account|लॉग आउट हो गए। आपकी लाइब्रेरी अकाउंट में सुरक्षित है|Logged out. Your library is safe in your account
+Your library is back ✅ (likes, playlists, history)|आपकी लाइब्रेरी वापस आ गई ✅ (पसंद, प्लेलिस्ट, इतिहास)|Your library is back ✅ (likes, playlists, history)
+Offline, will sync later|ऑफ़लाइन, बाद में सिंक होगा|Offline, will sync later
+Saving…|सेव हो रहा है…|Saving…
+Share…|शेयर…|Share…
+This one is from YouTube, it can't be downloaded|यह YouTube से है, डाउनलोड नहीं हो सकता|This one is from YouTube, it can't be downloaded
+Telegram copy didn't load, playing from JioSaavn…|टेलीग्राम कॉपी लोड नहीं हुई, JioSaavn से चला रहे हैं…|Telegram copy didn't load, playing from JioSaavn…
+No songs yet. Tap “···” on any song and choose Add to Playlist.|अभी कोई गाना नहीं। किसी भी गाने पर “···” दबाएँ और प्लेलिस्ट में जोड़ें चुनें।|No songs yet. Tap “···” on any song and choose Add to Playlist.
+abhi chalaya|अभी चलाया|just played
+shuffle me|शफ़ल में|on shuffle
+chal rahe hain|चल रहे हैं|playing
+Good Morning ☀️|सुप्रभात ☀️|Good Morning ☀️
+Good Afternoon 🌤️|नमस्ते 🌤️|Good Afternoon 🌤️
+Good Evening 🌆|शुभ संध्या 🌆|Good Evening 🌆
+Good Night 🌙|शुभ रात्रि 🌙|Good Night 🌙
+Aaj kya sunoge? 🎧|आज क्या सुनेंगे? 🎧|What will you listen to today? 🎧
+Chai ke saath kuch mast sa? ☕|चाय के साथ कुछ बढ़िया सा? ☕|Something nice with your chai? ☕
+Din ki shuruaat ek acche gaane se 🎶|दिन की शुरुआत एक अच्छे गाने से 🎶|Start the day with a great song 🎶
+Fresh mood, fresh music ✨|ताज़ा मूड, ताज़ा संगीत ✨|Fresh mood, fresh music ✨
+Chalo kuch mast bajate hain 🎶|चलो कुछ बढ़िया बजाते हैं 🎶|Let's play something great 🎶
+Thoda break, thoda music 🎵|थोड़ा ब्रेक, थोड़ा संगीत 🎵|A little break, a little music 🎵
+Aaj ka vibe kya hai? 💫|आज का मूड क्या है? 💫|What's today's vibe? 💫
+Shaam ho gayi, music on karo 🌇|शाम हो गई, संगीत चालू करें 🌇|It's evening, turn the music on 🌇
+Thoda music, thoda sukoon 🎵|थोड़ा संगीत, थोड़ा सुकून 🎵|A little music, a little peace 🎵
+Sone se pehle kuch soft sa? 🌙|सोने से पहले कुछ धीमा सा? 🌙|Something soft before sleep? 🌙
+Raat, headphones aur aapke gaane 🎧|रात, हेडफ़ोन और आपके गाने 🎧|Night, headphones and your songs 🎧
+🌐 Language|🌐 भाषा|🌐 Language
+App ki bhasha|ऐप की भाषा|App language
+Bhasha badal di ✅|भाषा बदल दी ✅|Language changed ✅
+ℹ️ Song info|ℹ️ गाने की जानकारी|ℹ️ Song info
+Song info|गाने की जानकारी|Song info
+Singer|गायक|Singer
+Singers|गायक|Singers
+Music|संगीत|Music
+Lyricist|गीतकार|Lyricist
+Lyrics by|गीतकार|Lyrics by
+Starring|कलाकार|Starring
+Album|एल्बम|Album
+Label|लेबल|Label
+Release|रिलीज़|Release
+Language|भाषा|Language
+Duration|अवधि|Duration
+Plays|प्ले|Plays
+Info la raha hoon…|जानकारी ला रहे हैं…|Loading info…
+Info nahi mili 😕|जानकारी नहीं मिली 😕|Couldn't get the info 😕
+⭐ Follow|⭐ फ़ॉलो करें|⭐ Follow
+✓ Following|✓ फ़ॉलो कर रहे हैं|✓ Following
+⭐ Following|⭐ फ़ॉलो किए कलाकार|⭐ Following
+Following|फ़ॉलो किए कलाकार|Following
+⭐ Naye gaane — aapke artists|⭐ नए गाने — आपके कलाकार|⭐ New from artists you follow
+Abhi kisi artist ko follow nahi kiya. Artist page pe ⭐ Follow dabao — unka naya gaana aate hi bataenge.|अभी किसी कलाकार को फ़ॉलो नहीं किया। कलाकार पेज पर ⭐ फ़ॉलो दबाएँ — उनका नया गाना आते ही बताएँगे।|You don't follow any artists yet. Tap ⭐ Follow on an artist page — we'll tell you when they release something new.
+Naya gaana aate hi Telegram bot pe message aayega 🔔|नया गाना आते ही टेलीग्राम बॉट पर मैसेज आएगा 🔔|You'll get a Telegram bot message when they release a new song 🔔
+Telegram se sign in karo to naye gaane ka message bot pe bhi aayega|टेलीग्राम से साइन इन करें तो नए गाने का मैसेज बॉट पर भी आएगा|Sign in with Telegram to also get new-song messages from the bot
+Unfollow|अनफ़ॉलो|Unfollow
+📸 Share card|📸 शेयर कार्ड|📸 Share card
+Share card|शेयर कार्ड|Share card
+Card bana raha hoon…|कार्ड बना रहे हैं…|Making the card…
+Share karo|शेयर करें|Share
+Save karo|सेव करें|Save
+Card save ho gaya 📸|कार्ड सेव हो गया 📸|Card saved 📸
+Lyric line ke saath|बोल की लाइन के साथ|With lyric line
+Line hatao|लाइन हटाएँ|Remove line
+Card nahi ban paya 😕|कार्ड नहीं बन पाया 😕|Couldn't make the card 😕
+⏩ Speed|⏩ स्पीड|⏩ Speed
+Playback speed|प्लेबैक स्पीड|Playback speed
+Awaaz ki pitch same rahegi|आवाज़ की पिच वही रहेगी|The voice pitch stays the same
+Listen Together me speed 1× rehti hai|साथ में सुनने में स्पीड 1× रहती है|Speed stays 1× in Listen Together
+🔊 Bass Boost|🔊 बेस बूस्ट|🔊 Bass Boost
+Bass Boost on 🔊|बेस बूस्ट चालू 🔊|Bass Boost on 🔊
+Bass Boost off|बेस बूस्ट बंद|Bass Boost off
+Bass Boost on — AutoMix tab tak band rahega (EQ ke saath mix nahi hota)|बेस बूस्ट चालू — तब तक ऑटोमिक्स बंद रहेगा (EQ के साथ मिक्स नहीं होता)|Bass Boost on — AutoMix pauses while it's on (no mixing with EQ)
+Clear queue|क्यू साफ़ करें|Clear queue
+Queue saaf ✅|क्यू साफ़ ✅|Queue cleared ✅
+Hata diya|हटा दिया|Removed
+Wapas lao|वापस लाएँ|Undo
+Bolo… gaane ka naam|बोलिए… गाने का नाम|Speak… the song name
+Sun raha hoon…|सुन रहे हैं…|Listening…
+Awaaz samajh nahi aayi, dobara bolo|आवाज़ समझ नहीं आई, फिर बोलें|Didn't catch that, try again
+Voice search|आवाज़ से खोजें|Voice search
+Pehchan raha hoon…|पहचान रहे हैं…|Identifying…
+Remove|हटाएँ|Remove
+Clear all|सब साफ़ करें|Clear all
+Naya gaana|नया गाना|New song
+Telegram se sign in karo|टेलीग्राम से साइन इन करें|Sign in with Telegram
+open your browser menu and choose|अपने ब्राउज़र का मेन्यू खोलें और चुनें|open your browser menu and choose
+. It opens full-screen, no ads, keeps playing when you lock your phone.|। यह फ़ुल-स्क्रीन खुलता है, कोई विज्ञापन नहीं, फ़ोन लॉक होने पर भी चलता है।|. It opens full-screen, no ads, keeps playing when you lock your phone.
+Gaane suno, aapka weekly recap yahan banega|गाने सुनें, आपका साप्ताहिक रीकैप यहाँ बनेगा|Listen to songs, your weekly recap will appear here
+Trending Now|अभी ट्रेंडिंग|Trending Now
+Trending Bollywood|ट्रेंडिंग बॉलीवुड|Trending Bollywood
+Romantic Hindi|रोमांटिक हिंदी|Romantic Hindi
+Punjabi Hits|पंजाबी हिट्स|Punjabi Hits
+Lofi & Chill|लो-फ़ाई और चिल|Lofi & Chill
+90s Bollywood|90 के दशक का बॉलीवुड|90s Bollywood
+Devotional|भक्ति|Devotional
+Global Hits|ग्लोबल हिट्स|Global Hits
+Connect|जोड़ें|Connect
+Not connected|जुड़ा नहीं|Not connected
+Not connected · tap to connect|जुड़ा नहीं · जोड़ने के लिए टैप करें|Not connected · tap to connect
+Dosto ke saath ek saath suno|दोस्तों के साथ एक साथ सुनें|Listen together with friends
+High|हाई|High
+Normal|नॉर्मल|Normal
+Lowest|सबसे कम|Lowest
+Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.|अपना अकाउंट पाने के लिए टेलीग्राम जोड़ें: पसंद, प्लेलिस्ट, हाल ही में सुने और डाउनलोड उसमें सेव होंगे और किसी भी फ़ोन पर वापस मिलेंगे।|Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.
+iPhone doesn't tell websites if you're on Wi‑Fi or mobile data, so|iPhone वेबसाइटों को नहीं बताता कि आप वाई-फ़ाई पर हैं या मोबाइल डेटा पर, इसलिए|iPhone doesn't tell websites if you're on Wi‑Fi or mobile data, so
+turn on Data saver when you leave Wi‑Fi|वाई-फ़ाई से बाहर जाते ही डेटा सेवर चालू करें|turn on Data saver when you leave Wi‑Fi
+. Quick switch: tap the quality badge under the progress bar on the Now Playing screen.|। जल्दी बदलने के लिए: अभी चल रहा स्क्रीन पर प्रोग्रेस बार के नीचे क्वालिटी बैज दबाएँ।|. Quick switch: tap the quality badge under the progress bar on the Now Playing screen.
+AutoMix|ऑटोमिक्स|AutoMix
+⚠️ On iPhone, the equalizer can make music stop when you lock the screen or switch apps. Keep it|⚠️ iPhone पर, स्क्रीन लॉक करने या ऐप बदलने पर इक्वलाइज़र से संगीत रुक सकता है। बैकग्राउंड में सुनने के लिए इसे|⚠️ On iPhone, the equalizer can make music stop when you lock the screen or switch apps. Keep it
+off|बंद रखें|off
+for background listening.|।|for background listening.
+Flat|फ़्लैट|Flat
+Vocal|वोकल|Vocal
+Party|पार्टी|Party
+Soft|सॉफ़्ट|Soft
+Wi‑Fi|वाई-फ़ाई|Wi‑Fi
+mobile data|मोबाइल डेटा|mobile data
+Your browser says you're on|आपका ब्राउज़र बताता है कि आप|Your browser says you're on
+, so quality switches automatically.|पर हैं, इसलिए क्वालिटी अपने आप बदलती है।|, so quality switches automatically.
+Install Dhun on your iPhone|Dhun को अपने iPhone पर इंस्टॉल करें|Install Dhun on your iPhone
+Install Dhun|Dhun इंस्टॉल करें|Install Dhun
+Podcasts|पॉडकास्ट|Podcasts
+🎙️ Podcasts|🎙️ पॉडकास्ट|🎙️ Podcasts
+Kahaniyan, comedy, gyaan — sab free|कहानियाँ, कॉमेडी, ज्ञान — सब मुफ़्त|Stories, comedy, knowledge — all free
+Kahaniyan, comedy, gyaan|कहानियाँ, कॉमेडी, ज्ञान|Stories, comedy, knowledge
+Podcast dhoondo…|पॉडकास्ट खोजें…|Search podcasts…
+Continue listening|सुनना जारी रखें|Continue listening
+Aapke podcasts|आपके पॉडकास्ट|Your podcasts
+Categories|श्रेणियाँ|Categories
+Kuch nahi mila 😕|कुछ नहीं मिला 😕|Nothing found 😕
+Load nahi hua — internet check karo|लोड नहीं हुआ — इंटरनेट देखें|Couldn't load — check your internet
+La raha hoon…|ला रहे हैं…|Loading…
+＋ Follow|＋ फ़ॉलो करें|＋ Follow
+Follow kar liya 🎙️|फ़ॉलो कर लिया 🎙️|Following 🎙️
+Unfollow kar diya|अनफ़ॉलो कर दिया|Unfollowed
+Latest episode|नया एपिसोड|Latest episode
+Resume|जारी रखें|Resume
+Episodes|एपिसोड|Episodes
+Aur episodes|और एपिसोड|More episodes
+✓ Played|✓ सुन लिया|✓ Played
+aur padho|और पढ़ें|read more
+kam dikhao|कम दिखाएँ|show less
+Is episode ke notes nahi hain|इस एपिसोड के नोट्स नहीं हैं|This episode has no notes
+🎙️ Episode notes|🎙️ एपिसोड नोट्स|🎙️ Episode notes
+Listen Together me podcast nahi chalta — pehle session band karo|साथ में सुनने में पॉडकास्ट नहीं चलता — पहले सेशन बंद करें|Podcasts don't play in Listen Together — stop the session first
+Episode nahi chal paya 😕 thodi der baad try karo|एपिसोड नहीं चल पाया 😕 थोड़ी देर बाद कोशिश करें|Episode couldn't play 😕 try again in a bit
+🎙️ Show kholo|🎙️ शो खोलें|🎙️ Open show
+✓ Played mark karo|✓ सुना हुआ मार्क करें|✓ Mark as played
+↺ Unplayed mark karo|↺ बिना सुना मार्क करें|↺ Mark as unplayed
+Podcast episodes Liked Songs me nahi jaate|पॉडकास्ट एपिसोड पसंदीदा गानों में नहीं जाते|Podcast episodes don't go into Liked Songs
+Podcast episodes Telegram pe download nahi hote|पॉडकास्ट एपिसोड टेलीग्राम पर डाउनलोड नहीं होते|Podcast episodes can't be downloaded to Telegram
+Episode khatam ✓|एपिसोड ख़त्म ✓|Episode finished ✓
+Iske baad koi episode nahi — queue khatam pe ruk jayega|इसके बाद कोई एपिसोड नहीं — क्यू ख़त्म होने पर रुक जाएगा|No episode after this — playback stops at the end
+Aaj|आज|Today
+Kal|कल|Yesterday
+tap the Share button|Safari में शेयर बटन|tap the Share button
+in Safari, then|दबाएँ, फिर|in Safari, then`;
+
+I18N_TABLE.split("\n").forEach(l => { const a = l.split("|"); if (a.length === 3) I18N.set(a[0].trim(), [a[1].trim(), a[2].trim() || a[0].trim()]); });
+const GREET_HI = { Morning: "सुप्रभात", Afternoon: "नमस्ते", Evening: "शुभ संध्या", Night: "शुभ रात्रि" };
+const I18N_RX = [ // [pattern, hindi, english]  (strings with numbers / names inside)
+  [/^Good (Morning|Afternoon|Evening|Night), (.+) (\S+)$/u, (m, a, n, e) => `${GREET_HI[a]}, ${n} ${e}`, null],
+  [/^(\d+) gaane$/, "$1 गाने", "$1 songs"],
+  [/^(\d+) episodes?$/, "$1 एपिसोड", null],
+  [/^(\d+) din pehle$/, "$1 दिन पहले", "$1 days ago"],
+  [/^“(.+)” ke results$/u, "“$1” के नतीजे", "Results for “$1”"],
+  [/^(\d+) follow kiye$/, "$1 फ़ॉलो किए", "$1 followed"],
+  [/^(.+) baaki$/u, "$1 बाक़ी", "$1 left"],
+  [/^(Wi‑Fi|Data saver) · (\d+) kbps$/u, (m, a, k) => `${a === "Wi‑Fi" ? "वाई-फ़ाई" : "डेटा सेवर"} · ${k} kbps`, null],
+  [/^About (\d+) MB for a 4-minute song, stored in Telegram, not on your phone\.$/, "4 मिनट के गाने के लिए लगभग $1 MB, टेलीग्राम में सेव, आपके फ़ोन में नहीं।", null],
+  [/^(\d+) songs?$/, "$1 गाने", null],
+  [/^(\d+) song(s?) · (.+)$/, "$1 गाने · $3", null],
+  [/^(.+) followers$/, "$1 फ़ॉलोअर्स", null],
+  [/^(\d+) gaane · (.+)$/, "$1 गाने · $2", "$1 songs · $2"],
+  [/^(.+) · (\d+) gaane$/, "$1 · $2 गाने", "$1 · $2 songs"],
+  [/^Artist dekho: (.+)$/u, "कलाकार देखें: $1", "View artist: $1"],
+  [/^Album dekho: (.+)$/u, "एल्बम देखें: $1", "View album: $1"],
+  [/^⏩ Speed: (.+)$/u, "⏩ स्पीड: $1", null],
+  [/^🔊 Bass Boost: On$/u, "🔊 बेस बूस्ट: चालू", null],
+  [/^🔊 Bass Boost: Off$/u, "🔊 बेस बूस्ट: बंद", null],
+  [/^😴 Sleep timer: (\d+) min$/u, "😴 स्लीप टाइमर: $1 मिनट", null],
+  [/^(\d+) min baaki$/, "$1 मिनट बाक़ी", "$1 min left"],
+  [/^Speed (.+)× ⏩$/u, "स्पीड $1× ⏩", null],
+  [/^⭐ (.+) ko follow kiya$/u, "⭐ $1 को फ़ॉलो किया", "⭐ Following $1"],
+  [/^(.+) ko unfollow kiya$/u, "$1 को अनफ़ॉलो किया", "Unfollowed $1"],
+  [/^(\d+) artists?$/, "$1 कलाकार", null],
+  [/^(\d+) gaane hataye$/, "$1 गाने हटाए", "$1 songs removed"],
+  [/^“(.+)” queue se hataya$/u, "“$1” क्यू से हटाया", "Removed “$1” from the queue"],
+];
+function tr(s) {
+  if (appLang === "hinglish" || !s) return s;
+  const k = s.trim(); if (!k || k.length > 300) return s;
+  let out = null; const e = I18N.get(k);
+  if (e) out = appLang === "hi" ? e[0] : e[1];
+  else for (const r of I18N_RX) { if (r[0].test(k)) { const rep = appLang === "hi" ? r[1] : r[2]; if (rep != null) out = k.replace(r[0], rep); break; } }
+  if (out == null || out === k) return s;
+  const lead = s.match(/^\s*/)[0], tail = s.match(/\s*$/)[0];
+  return lead + out + tail;
+}
+const trOrig = new WeakMap(), trMine = new WeakMap(), trAttrO = new WeakMap();
+const TR_SKIP = "#npTitle,#npArtist,#miniTitle,#miniArtist,.lyrBody,#lyrPanel p,.row .t,.tile .t1,.tile .t2,.shead .t1,.shead .sub,.arHero h1,.dtT,.dealsHome,.djOne,.jamChat .jcList,.jcMsg,script,style,textarea,input,.siVal,.qT,.scPrev,[data-notr]";
+function trText(n) {
+  const p = n.parentElement; if (!p || p.closest(TR_SKIP)) return;
+  let o = trOrig.get(n);
+  if (o === undefined || n.data !== trMine.get(n)) { o = n.data; trOrig.set(n, o); }
+  const v = tr(o);
+  trMine.set(n, v);
+  if (v !== n.data) n.data = v;
+}
+function trAttrs(el) {
+  for (const a of ["placeholder", "aria-label", "title"]) {
+    if (!el.hasAttribute || !el.hasAttribute(a)) continue;
+    let m = trAttrO.get(el); if (!m) { m = {}; trAttrO.set(el, m); }
+    const cur = el.getAttribute(a);
+    if (m[a] === undefined || cur !== m[a + "$"]) m[a] = cur;
+    const v = tr(m[a]); m[a + "$"] = v; if (v !== cur) el.setAttribute(a, v);
+  }
+}
+function trTree(root) {
+  if (!root) return;
+  if (root.nodeType === 3) return trText(root);
+  if (root.nodeType !== 1 && root.nodeType !== 9 && root.nodeType !== 11) return;
+  if (root.nodeType === 1) { if (root.closest(TR_SKIP) && !root.matches("input,textarea")) return; trAttrs(root); }
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  let n; while ((n = w.nextNode())) { if (n.nodeType === 3) trText(n); else trAttrs(n); }
+}
+let trBusy = false, trEver = appLang !== "hinglish";
+const trObs = new MutationObserver(muts => {
+  if (trBusy || !trEver) return; trBusy = true;
+  try { for (const m of muts) { if (m.type === "characterData") trText(m.target); else if (m.type === "attributes") trAttrs(m.target); else m.addedNodes.forEach(trTree); } } finally { trBusy = false; }
+});
+trObs.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["placeholder", "aria-label", "title"] });
+function setLang(l) {
+  if (!LANGS.some(x => x[0] === l)) return;
+  appLang = l; store.set("lang", l); trEver = true;
+  document.documentElement.lang = l === "hi" ? "hi" : "en";
+  trBusy = true; try { trTree(document.body); } finally { trBusy = false; }
+  try { rerender(); } catch (e) {}
+  try { renderQueue(); } catch (e) {}
+}
+if (appLang !== "hinglish") { document.documentElement.lang = appLang === "hi" ? "hi" : "en"; trBusy = true; try { trTree(document.body); } finally { trBusy = false; } }
+const T = s => tr(s); // for strings built in code (alerts, share text)
+
+// ---------- 2) Lyrics, Apple Music style ----------
+// Big bold lines; the sung line is bright, slightly larger and fills left→right over its duration (word timing when the LRC has
+// <mm:ss.xx> word tags, else spread across the line); other lines dim + softly blurred; spring scroll keeps the line in the upper third;
+// instrumental gaps show • • • that fill up until the next line. Only transform / opacity / a CSS variable change per frame.
+function lyrBuild(syn) { // -> display items
+  const items = [], est = l => Math.max(0.9, Math.min(7, 0.75 + l.x.length * 0.075));
+  if (syn.length && syn[0].t > 4) items.push({ dots: 1, t: 0.4, end: syn[0].t, li: 0 });
+  syn.forEach((l, i) => {
+    const nx = syn[i + 1], nt = nx ? nx.t : l.t + 8;
+    if (!l.x || /^[♪♫\s.…-]*$/.test(l.x)) { if (nt - l.t > 2.5) items.push({ dots: 1, t: l.t, end: nt, li: i + 1 < syn.length ? i + 1 : i }); return; }
+    const words = l.w && l.w.length ? l.w : null;
+    let d = words ? Math.max(0.5, (l.wEnd || words[words.length - 1].t + 0.6) - l.t) : Math.min(nt - l.t, est(l));
+    d = Math.max(0.4, Math.min(d, nt - l.t));
+    items.push({ x: l.x, t: l.t, end: l.t + d, li: i, w: words });
+    if (nx && nt - (l.t + d) > 6) items.push({ dots: 1, t: l.t + d + 0.6, end: nt, li: i + 1 });
+  });
+  return items;
+}
+const parseLRCRaw = parseLRC;
+parseLRC = function (s) { // keeps v21 output, adds word timings from enhanced LRC (<mm:ss.xx>word)
+  const out = [];
+  for (const line of String(s || "").split(/\r?\n/)) {
+    const tags = [...line.matchAll(/\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g)]; if (!tags.length) continue;
+    const body = line.replace(/\[[^\]]*\]/g, "");
+    const wt = [...body.matchAll(/<(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)>([^<]*)/g)];
+    let x = body.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim(), w = null, wEnd = 0;
+    if (wt.length > 1) { w = []; let c = 0; for (const m of wt) { const tt = +m[1] * 60 + parseFloat(m[2].replace(":", ".")), txt = m[3]; if (txt.trim()) { w.push({ t: tt, c, n: txt.trim().length }); } else wEnd = tt; c += txt.replace(/\s+/g, " ").length; } x = wt.map(m => m[3]).join("").replace(/\s+/g, " ").trim(); }
+    for (const m of tags) out.push({ t: +m[1] * 60 + parseFloat(m[2].replace(":", ".")), x, w, wEnd });
+  }
+  return out.sort((a, b) => a.t - b.t);
+};
+const lyr2 = { items: null, id: null, cur: -2, raf: 0, y: 0, v: 0, target: null, lastT: 0, curEl: null };
+const lyrRenderV22 = lyrRender;
+lyrRender = function () {
+  const p = $("#lyrPanel"); if (!p) return;
+  const c = lyrCache.get(lyrFor) || {};
+  lyr2.items = null; lyr2.cur = -2; lyr2.curEl = null;
+  if (!queue[qi] || c.loading || !c.synced) { lyrRenderV22(); p.classList.toggle("lyrPlainMode", !!c.plain && !c.synced); return; }
+  p.classList.remove("lyrPlainMode");
+  const items = lyrBuild(c.synced); lyr2.items = items; lyr2.id = lyrFor;
+  p.innerHTML = `<div class="lyrBody synced am"><div class="lyrPad"></div>${items.map((it, k) => it.dots
+    ? `<p class="ldots fut" data-li="${it.li}" data-k="${k}" style="--i:${Math.min(k, 14)}"><i></i><i></i><i></i></p>`
+    : `<p class="lline fut" data-li="${it.li}" data-k="${k}" style="--i:${Math.min(k, 14)}"><span>${esc(it.x)}</span></p>`).join("")}<div class="lyrPad end"></div></div>`;
+  lyr2.y = p.scrollTop; lyr2.v = 0; lyr2.target = null;
+  lyrKick(true);
+};
+lyrTick = function (force) { lyrKick(force); };
+function lyrActive(tm) { const it = lyr2.items; let k = -1; for (let j = 0; j < it.length; j++) { if (it[j].t <= tm) k = j; else break; } return k; }
+function lyrKick(force) {
+  if (!lyrOpenNow || !lyr2.items) return;
+  if (force) lyr2.cur = -2;
+  if (!lyr2.raf) { lyr2.lastT = performance.now(); lyr2.raf = requestAnimationFrame(lyrFrame); }
+}
+function lyrFrame(now) {
+  lyr2.raf = 0;
+  const p = $("#lyrPanel");
+  if (!p || !lyrOpenNow || !lyr2.items || lyr2.id !== lyrFor || !np.classList.contains("open") || document.hidden) return;
+  const dt = Math.min(0.05, (now - lyr2.lastT) / 1000); lyr2.lastT = now;
+  const rm = reduceMotion();
+  const tm = (P.time() || 0) + 0.15, k = lyrActive(tm), it = lyr2.items;
+  if (k !== lyr2.cur) {
+    const els = p.querySelectorAll(".lyrBody > p");
+    lyr2.cur = k; lyr2.curEl = k >= 0 ? els[k] : null;
+    for (let j = 0; j < els.length; j++) { const d = j - k, e = els[j]; e.className = (it[j].dots ? "ldots " : "lline ") + (d === 0 ? "cur" : d < 0 ? "past" : "fut") + (Math.abs(d) === 1 ? " d1" : Math.abs(d) === 2 ? " d2" : Math.abs(d) >= 3 ? " d3" : ""); if (d !== 0) e.style.removeProperty("--p"); }
+    if (lyr2.curEl) lyr2.target = Math.max(0, lyr2.curEl.offsetTop - p.clientHeight * 0.3);
+    else lyr2.target = 0;
+    if (rm && Date.now() - lyrUserScroll > 3500) { p.scrollTop = lyr2.target; lyr2.y = lyr2.target; }
+  }
+  // fill progress of the active line / dots
+  if (k >= 0 && lyr2.curEl) {
+    const a = it[k]; let pr;
+    if (a.w) { const tot = Math.max(1, a.x.length); let c = 0; for (let j = 0; j < a.w.length; j++) { const w = a.w[j], nx = a.w[j + 1], we = nx ? nx.t : a.end; if (tm >= w.t) c = w.c + w.n * Math.min(1, (tm - w.t) / Math.max(0.15, we - w.t)); } pr = c / tot; }
+    else pr = (tm - a.t) / Math.max(0.3, a.end - a.t);
+    pr = Math.max(0, Math.min(1, pr));
+    lyr2.curEl.style.setProperty("--p", pr.toFixed(3));
+    if (a.dots) lyr2.curEl.classList.toggle("bye", a.end - tm < 0.7);
+  }
+  // spring scroll (critically damped) unless the user is scrolling by hand
+  if (!rm && lyr2.target != null && Date.now() - lyrUserScroll > 3500) {
+    if (Math.abs(p.scrollTop - lyr2.y) > 2) { lyr2.y = p.scrollTop; lyr2.v = 0; } // something else moved it
+    const w = 9, x = lyr2.y - lyr2.target; const acc = -w * w * x - 2 * w * lyr2.v; lyr2.v += acc * dt; lyr2.y += lyr2.v * dt;
+    if (Math.abs(lyr2.y - lyr2.target) < 0.5 && Math.abs(lyr2.v) < 5) { lyr2.y = lyr2.target; lyr2.v = 0; }
+    p.scrollTop = lyr2.y;
+  } else lyr2.y = p.scrollTop;
+  lyr2.raf = requestAnimationFrame(lyrFrame);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) lyrKick(true); });
+new MutationObserver(() => { if (np.classList.contains("open")) lyrKick(true); }).observe(np, { attributes: true, attributeFilter: ["class"] });
+// long-press a lyric line -> share card with that line
+(() => {
+  const aw = $("#npArtWrap"); if (!aw) return; let lp = null;
+  const clear = () => { if (lp) { clearTimeout(lp.t); lp = null; } };
+  aw.addEventListener("touchstart", e => { const l = e.target.closest && e.target.closest("#lyrPanel p.lline"); if (!l) return; const p = e.touches[0]; clear(); lp = { x: p.clientX, y: p.clientY, t: setTimeout(() => { lp = null; const txt = l.textContent.trim(); if (txt && queue[qi]) { lyrLongPressed = Date.now(); shareCard(queue[qi], txt); } }, 550) }; }, { passive: true, capture: true });
+  aw.addEventListener("touchmove", e => { if (!lp) return; const p = e.touches[0]; if (Math.abs(p.clientX - lp.x) + Math.abs(p.clientY - lp.y) > 10) clear(); }, { passive: true, capture: true });
+  aw.addEventListener("touchend", clear, { passive: true, capture: true });
+  aw.addEventListener("contextmenu", e => { const l = e.target.closest && e.target.closest("#lyrPanel p.lline"); if (l) e.preventDefault(); });
+  aw.addEventListener("click", e => { if (Date.now() - lyrLongPressed < 900) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+})();
+var lyrLongPressed = 0;
+
+// ---------- 3) AutoMix 2: DJ-style transitions ----------
+// Per song (from the cheap 48 kbps copy, decoded at 8 kHz): where the sound really starts / ends, how long the fade-out tail is,
+// and the beat grid (tempo by autocorrelation of an onset envelope + beat phase). The blend then starts ON a beat, the next song
+// starts on its first beat (leading silence skipped), volumes cross on an equal-power curve and the outgoing song's bass is swept
+// out with a high-pass filter (bass swap) when the browser lets us route it (CORS-clean JioSaavn audio, Web Audio running).
+// No tempo change (time-stretching both songs is not safe enough on phones). Same exclusions as before.
+mixAnalyse = function (t) {
+  if (!t || !mixOn()) return null;
+  if (mixInfo.has(t.id)) return mixInfo.get(t.id);
+  const box = { v: undefined }; mixInfo.set(t.id, box);
+  if (mixInfo.size > 40) mixInfo.delete(mixInfo.keys().next().value);
+  const src = mixAnaSrc(t); if (!src) { box.v = null; return box; }
+  (async () => {
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext; if (!OAC) return null;
+    const r = await fetch(src); if (!r.ok) return null; const ab = await r.arrayBuffer();
+    const ctx = new OAC(1, 1, 8000);
+    const buf = await new Promise((res, rej) => { const p = ctx.decodeAudioData(ab, res, rej); if (p && p.then) p.then(res, rej); });
+    return mixAnaBuf(buf);
+  })().then(v => { box.v = v || null; }, () => { box.v = null; });
+  return box;
+};
+function mixAnaBuf(buf) {
+  const sr = buf.sampleRate, L0 = buf.length, nc = buf.numberOfChannels;
+  const x = new Float32Array(L0); for (let c = 0; c < nc; c++) { const ch = buf.getChannelData(c); for (let i = 0; i < L0; i++) x[i] += ch[i] / nc; }
+  // loudness every 50 ms
+  const w = Math.max(1, Math.round(sr * 0.05)), n = Math.floor(L0 / w); if (n < 300) return null;
+  const db = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let s = 0; for (let k = i * w, e = k + w; k < e; k++) s += x[k] * x[k]; db[i] = 10 * Math.log10(s / w + 1e-12); }
+  const ref = Array.from(db).sort((a, b) => a - b)[Math.floor(n * 0.7)], sil = Math.max(ref - 30, -65);
+  let h = 0; while (h < n && db[h] < sil) h++;
+  let e = n - 1; while (e > h && db[e] < sil) e--;
+  const avg = i => { let s = 0, c = 0; for (let k = Math.max(0, i - 19); k <= i; k++) { s += db[k]; c++; } return s / c; };
+  let o = e; while (o > h && e - o < 300 && avg(o) < ref - 8) o--;
+  // onset envelope (16 ms hop, first difference = transient emphasis)
+  const hop = 128, m = Math.floor(L0 / hop), env = new Float32Array(m), fl = new Float32Array(m);
+  for (let k = 1; k < m; k++) { let s = 0; for (let i = k * hop, z = i + hop; i < z; i++) { const d = x[i] - x[i - 1]; s += d * d; } env[k] = Math.log(1e-9 + s); }
+  for (let k = 2; k < m; k++) { const d = env[k] - env[k - 1]; fl[k] = d > 0 ? d : 0; }
+  const fps = sr / hop, a0 = Math.floor(m * 0.12), a1 = Math.floor(m * 0.88);
+  let bpm = 0, per = 0, phase = 0, conf = 0;
+  if (a1 - a0 > fps * 30) {
+    const lo = Math.floor(fps * 60 / 180), hi = Math.ceil(fps * 60 / 70), ac = new Float32Array(hi + 2);
+    let mean = 0; for (let k = a0; k < a1; k++) mean += fl[k]; mean /= (a1 - a0);
+    for (let lag = lo; lag <= hi + 1; lag++) { let s = 0; for (let k = a0; k < a1 - lag; k++) s += (fl[k] - mean) * (fl[k + lag] - mean); ac[lag] = s / (a1 - a0 - lag); }
+    let best = -1, bl = 0; for (let lag = lo; lag <= hi; lag++) { const b = 60 * fps / lag, wgt = Math.exp(-0.5 * Math.pow(Math.log2(b / 118) / 0.9, 2)); const v = ac[lag] * wgt; if (v > best) { best = v; bl = lag; } }
+    let sum = 0, cnt = 0; for (let lag = lo; lag <= hi; lag++) { sum += Math.max(0, ac[lag]); cnt++; }
+    conf = sum > 0 ? Math.max(0, ac[bl]) / (sum / cnt) : 0;
+    const y0 = ac[bl - 1] || 0, y1 = ac[bl], y2 = ac[bl + 1] || 0, den = y0 - 2 * y1 + y2; const off = den ? Math.max(-0.5, Math.min(0.5, 0.5 * (y0 - y2) / den)) : 0;
+    per = bl + off; bpm = 60 * fps / per;
+    let bp = 0, bs = -1; const steps = Math.max(8, Math.round(per));
+    for (let s = 0; s < steps; s++) { const ph = s * per / steps; let v = 0; for (let k = a0 + ph; k < a1; k += per) v += fl[Math.round(k)]; if (v > bs) { bs = v; bp = ph; } }
+    phase = (bp % per) / fps; per = per / fps;
+    if (conf < 1.6) { bpm = 0; per = 0; }
+  }
+  // first clear onset after the leading silence (where the next song should come in)
+  let first = h * 0.05;
+  if (per) { const k0 = Math.floor(h * 0.05 * fps), k1 = Math.min(m, k0 + Math.floor(fps * 3)); let mx = 0; for (let k = k0; k < k1; k++) mx = Math.max(mx, fl[k]); for (let k = k0; k < k1; k++) if (fl[k] > mx * 0.5) { first = k / fps; break; } }
+  return { head: Math.min(h * 0.05, 8), first: Math.min(first, 9), end: (e + 1) * 0.05, outro: (e - o) * 0.05, dur: buf.duration, bpm: Math.round(bpm * 10) / 10, per, phase, conf: Math.round(conf * 100) / 100 };
+}
+function mixPlan(info, d) { // when to start blending and for how long
+  const end = info ? Math.min(d, info.end) : d;
+  let L;
+  if (info && info.outro >= 5) L = Math.max(4, Math.min(12, info.outro * 0.8 + 1)); // song fades out by itself: blend over the fade
+  else if (info && info.per) { L = info.per * 16; while (L > 10) L /= 2; if (L < 4) L *= 2; } // hard ending: 4 bars (or 2/8)
+  else L = info ? Math.min(10, Math.max(3, info.outro + 2)) : 5;
+  let at = end - L;
+  if (info && info.per) { const b = Math.round((at - info.phase) / info.per); const snapped = info.phase + b * info.per; if (Math.abs(snapped - at) < info.per) at = snapped; L = end - at; }
+  return { at: Math.max(0, at), L: Math.max(2, Math.min(13, L)), end };
+}
+let mixSched = null;
+const mixAbortV22 = mixAbort;
+mixAbort = function () { if (mixSched) { clearTimeout(mixSched.t); mixSched = null; } return mixAbortV22.apply(this, arguments); };
+mixMaybe = function () {
+  if (mixFade || mixBusy || mixSched || !mixOn() || mode !== "audio" || eqRouted || document.hidden || userPaused || audio.paused || (typeof jamOn === "function" && jamOn())) return;
+  const t = queue[qi], d = audio.duration; if (!t || !isFinite(d) || d < 40) return;
+  const ti = mixAnalyse(t), info = ti && ti.v;
+  const j = mixNextIndex(); if (j < 0) return;
+  const n = queue[j], url = mixSrcOf(n); if (!url) { if (!mixPrepped.has(n.id)) { mixPrepped.add(n.id); prepNext(); } return; }
+  const plan = mixPlan(info, d), rate = audio.playbackRate || 1;
+  const left = (plan.at - audio.currentTime) / rate;
+  if (plan.end - audio.currentTime > plan.L + 40 || plan.end - audio.currentTime < 1) return;
+  const ni = mixAnalyse(n);
+  if (!mixPre || mixPre.dataset.id !== n.id || mixPre.dataset.url !== url) {
+    mixDrop(mixPre); mixPre = document.createElement("audio"); mixPre.setAttribute("playsinline", ""); mixPre.preload = "auto"; mixPre.dataset.id = n.id; mixPre.dataset.url = url; mixPre.volume = 0;
+    if (/^https:\/\/[^/]*saavncdn\.com\//.test(url)) mixPre.crossOrigin = "anonymous"; // so its own ending can be bass-swapped later
+    mixPre.src = url; try { mixPre.load(); } catch (e) {}
+  }
+  if (left > 1.3) return;
+  const tok = loadToken, go = () => {
+    mixSched = null;
+    if (tok !== loadToken || mixFade || mixBusy || audio.paused || userPaused || document.hidden || queue[j] !== n) return;
+    const nv = ni && ni.v, head = nv ? (nv.per ? Math.max(0, nv.first - 0.03) : nv.head) : 0;
+    const L = Math.max(1, Math.min(plan.L, (plan.end - audio.currentTime)));
+    mixStart(j, n, url, L, head);
+  };
+  if (left <= 0.03) go(); else mixSched = { t: setTimeout(go, left * 1000) };
+};
+// bass swap on the outgoing song
+let mixCtxA = null;
+function mixCtx() {
+  if (mixCtxA) return mixCtxA;
+  const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
+  try { mixCtxA = new AC({ latencyHint: "playback" }); } catch (e) { try { mixCtxA = new AC(); } catch (e2) { return null; } }
+  return mixCtxA;
+}
+document.addEventListener("pointerdown", () => { if (!mixOn() || eqOn) return; const c = mixCtx(); if (c && c.state !== "running") c.resume().catch(() => {}); }, true);
+function mixFx(old, L) {
+  try {
+    if (!old || old.crossOrigin !== "anonymous" || !/saavncdn\.com/.test(old.currentSrc || old.src || "")) return false;
+    const c = mixCtx(); if (!c || c.state !== "running") return false;
+    const s = c.createMediaElementSource(old), hp = c.createBiquadFilter(), g = c.createGain();
+    hp.type = "highpass"; hp.Q.value = 0.71; s.connect(hp); hp.connect(g); g.connect(c.destination);
+    const t0 = c.currentTime;
+    hp.frequency.setValueAtTime(25, t0); hp.frequency.setValueAtTime(25, t0 + L * 0.3);
+    hp.frequency.exponentialRampToValueAtTime(320, t0 + L * 0.55); hp.frequency.exponentialRampToValueAtTime(1200, t0 + L);
+    old._fx = { s, hp, g }; return true;
+  } catch (e) { return false; }
+}
+const mixDropV22 = mixDrop;
+mixDrop = function (el) { if (el && el._fx) { try { el._fx.g.disconnect(); el._fx.hp.disconnect(); el._fx.s.disconnect(); } catch (e) {} el._fx = null; } return mixDropV22(el); };
+const mixCommitV22 = mixCommit;
+mixCommit = function (j, t, url, el, L) {
+  const old = audio;
+  mixCommitV22.apply(this, arguments);
+  window.__mix2 = { at: Date.now(), L, fx: mixFx(old, L), bpm: (mixInfo.get(t.id) || {}).v ? mixInfo.get(t.id).v.bpm : 0 };
+};
+// main <audio>: load JioSaavn files CORS-clean while AutoMix can run (so their ending can be bass-swapped); never for other sources
+const loadCurrentV22 = loadCurrent;
+loadCurrent = function () { try { if (!eqRouted) audio.removeAttribute("crossorigin"); } catch (e) {} return loadCurrentV22.apply(this, arguments); };
+const playUrlV22 = playUrl;
+playUrl = function (t, url, my, autoplay, startAt, attempt) {
+  try { if (!eqRouted) { if (mixOn() && !attempt && /^https:\/\/[^/]*saavncdn\.com\//.test(url || "")) audio.crossOrigin = "anonymous"; else audio.removeAttribute("crossorigin"); } } catch (e) {}
+  return playUrlV22.apply(this, arguments);
+};
+
+// ---------- 4) Song info (JioSaavn details: singers, music, lyricist, album, label, year, language, plays) ----------
+const siCache = new Map();
+function fmtPlays(n) { n = +n || 0; if (!n) return ""; if (n >= 1e7) return (n / 1e7).toFixed(n >= 1e8 ? 0 : 1).replace(/\.0$/, "") + " Cr"; if (n >= 1e5) return (n / 1e5).toFixed(1).replace(/\.0$/, "") + " L"; if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K"; return String(n); }
+const LANG_NAME = { hindi: ["Hindi", "हिन्दी"], punjabi: ["Punjabi", "पंजाबी"], english: ["English", "अंग्रेज़ी"], bhojpuri: ["Bhojpuri", "भोजपुरी"], haryanvi: ["Haryanvi", "हरियाणवी"], tamil: ["Tamil", "तमिल"], telugu: ["Telugu", "तेलुगु"], marathi: ["Marathi", "मराठी"], gujarati: ["Gujarati", "गुजराती"], bengali: ["Bengali", "बंगाली"], kannada: ["Kannada", "कन्नड़"], malayalam: ["Malayalam", "मलयालम"], rajasthani: ["Rajasthani", "राजस्थानी"], urdu: ["Urdu", "उर्दू"] };
+function songInfo(t) {
+  if (!t) return;
+  const sid = t.src === "saavn" ? t.id : (typeof resolved !== "undefined" && resolved[t.id] && resolved[t.id].sid) || t.sid || "";
+  const head = `<div class="shead"><img src="${esc(small(t.thumb) || ytThumb(t.id))}"><div><div class="t1">${esc(t.title)}</div><div class="sub">${esc(t.artist || "")}</div></div></div>`;
+  const paint = d => {
+    const ppl = (l, role) => l && l.length ? `<div class="siRow"><span class="siK">${esc(tr(role))}</span><span class="siVal">${l.map(a => a.id ? `<a data-s="ar" data-id="${esc(a.id)}" data-n="${esc(a.name)}">${esc(a.name)}</a>` : esc(a.name)).join(", ")}</span></div>` : "";
+    const row = (k, v, act) => v ? `<div class="siRow"><span class="siK">${esc(tr(k))}</span><span class="siVal">${act ? `<a data-s="${act}">${esc(v)}</a>` : esc(v)}</span></div>` : "";
+    const ln = d.language ? (LANG_NAME[String(d.language).toLowerCase()] || [d.language, d.language])[appLang === "hi" ? 1 : 0] : "";
+    let rel = d.release_date || d.year || "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(rel)) { try { rel = new Date(rel + "T00:00:00").toLocaleDateString(appLang === "hi" ? "hi-IN" : "en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch (e) {} }
+    return `<div class="sgroup siBox">${head}${d.loading ? `<div class="siNote"><div class="spin"></div>${esc(tr("Info la raha hoon…"))}</div>` : d.error ? `<div class="siNote">${esc(tr("Info nahi mili 😕"))}</div>` :
+      ppl(d.singers, "Singers") + ppl(d.music, "Music") + ppl(d.lyricists, "Lyricist") + ppl(d.starring, "Starring") +
+      row("Album", d.album, d.albumId ? "al" : "") + row("Release", String(rel || "")) + row("Label", d.label) + row("Language", ln) +
+      row("Duration", d.duration ? fmt(+d.duration) : "") + row("Plays", fmtPlays(d.play_count))}</div>`;
+  };
+  const handlers = { ar: b => { closeNP(); collOpen("ar:" + b.dataset.id); }, al: () => { const d = siCache.get(sid) || {}; if (d.albumId) { closeNP(); collOpen("al:" + d.albumId); } } };
+  if (!sid) { // YouTube / unknown source: what we know locally
+    showSheet(`<div class="sgroup siBox">${head}<div class="siRow"><span class="siK">${esc(tr("Album"))}</span><span class="siVal">${esc(t.album || "—")}</span></div>${t.dur ? `<div class="siRow"><span class="siK">${esc(tr("Duration"))}</span><span class="siVal">${fmt(t.dur)}</span></div>` : ""}<div class="siRow"><span class="siK">Source</span><span class="siVal">${isYT(t) ? "YouTube" : "—"}</span></div></div>`, {});
+    return;
+  }
+  const c = siCache.get(sid);
+  showSheet(paint(c || { loading: 1 }), handlers);
+  if (c && !c.error) return;
+  api("/api/songinfo?id=" + encodeURIComponent(sid)).then(d => { siCache.set(sid, d && !d.error ? d : { error: 1 }); }).catch(() => siCache.set(sid, { error: 1 }))
+    .then(() => { if (!sheet.classList.contains("hidden") && sheet.querySelector(".siBox")) { sheet.innerHTML = paint(siCache.get(sid)) + `<div class="sgroup cancel"><button data-s="cancel">Cancel</button></div>`; } });
+}
+
+// ---------- 5) Follow artists ⭐ + "New from artists you follow" + Telegram bot alert (server) ----------
+let follows = store.get("follows", []); // [{id,name,image,at}]
+const isFollow = id => follows.some(a => a.id === String(id));
+function followSync() {
+  if (!tgCode || !tgMe.linked) return;
+  post("/api/u/follow", { c: tgCode, op: "put", list: follows.map(a => ({ id: a.id, name: a.name })) }).catch(() => {});
+}
+function followPull() {
+  if (!tgCode || !tgMe.linked) return;
+  post("/api/u/follow", { c: tgCode, op: "get" }).then(d => {
+    if (!d || !Array.isArray(d.list)) return;
+    let ch = false; for (const a of d.list) if (a && a.id && !isFollow(a.id)) { follows.push({ id: String(a.id), name: a.name || "", image: "", at: Date.now() }); ch = true; }
+    if (ch) { store.set("follows", follows); if (curTab === "library" && subView === "following") rerender(); }
+    if (follows.length && (!d.list.length || ch)) followSync();
+  }).catch(() => {});
+}
+function followToggle(a) {
+  if (!a || !a.id) return;
+  const id = String(a.id);
+  if (isFollow(id)) { follows = follows.filter(x => x.id !== id); toast(tr(`${a.name} ko unfollow kiya`)); }
+  else { follows.unshift({ id, name: a.name || "", image: a.image || "", at: Date.now() }); toast(tr(`⭐ ${a.name} ko follow kiya`)); if (!tgMe.linked && !store.get("folHint", 0)) { store.set("folHint", 1); setTimeout(() => toast(tr("Telegram se sign in karo to naye gaane ka message bot pe bhi aayega"), 4200), 2400); } }
+  store.set("follows", follows); followSync(); relLast = 0; store.set("relCache", null);
+}
+function followBtnHTML(c, key) {
+  const k = key.slice(0, key.indexOf(":")); if (k !== "ar" && k !== "arn") return "";
+  const id = String((c && c.id) || (k === "ar" ? key.slice(3) : "")); if (!id) return "";
+  return `<button data-act="follow" data-id="${esc(id)}" class="folBtn${isFollow(id) ? " on" : ""}">${isFollow(id) ? "✓ Following" : "⭐ Follow"}</button>`;
+}
+const renderCollV22 = renderColl;
+renderColl = function (key) {
+  const r = renderCollV22.apply(this, arguments);
+  const c = colls[key]; const row = view.querySelector(".arBtns");
+  if (row && c && !c.loading && !c.error && !row.querySelector("[data-act=follow]")) { const h = followBtnHTML(c, key); if (h) row.insertAdjacentHTML("beforeend", h); }
+  return r;
+};
+view.addEventListener("click", e => {
+  const b = e.target.closest("[data-act=follow]");
+  if (b) { e.preventDefault(); e.stopPropagation(); const key = String(subView || "").slice(2), c = colls[key] || {}; followToggle({ id: b.dataset.id, name: c.name || collTitle(key, c), image: c.image || "" }); const on = isFollow(b.dataset.id); b.classList.toggle("on", on); b.textContent = tr(on ? "✓ Following" : "⭐ Follow"); return; }
+  const u = e.target.closest("[data-act=unfollow]");
+  if (u) { e.preventDefault(); e.stopPropagation(); const a = follows.find(x => x.id === u.dataset.id); if (a) followToggle(a); rerender(); return; }
+  const fa = e.target.closest("[data-fol]");
+  if (fa) { e.preventDefault(); e.stopPropagation(); collOpen("ar:" + fa.dataset.fol); return; }
+  const rl = e.target.closest("[data-rel]");
+  if (rl) { e.preventDefault(); e.stopPropagation(); collOpen("al:" + rl.dataset.rel); return; }
+}, true);
+function renderFollowing() {
+  view.innerHTML = `<button class="back" data-act="back">${ICON.chev}Library</button><h1>⭐ Following</h1>
+    ${follows.length ? `<div class="setNote folNote">${tgMe.linked ? "Naya gaana aate hi Telegram bot pe message aayega 🔔" : "Telegram se sign in karo to naye gaane ka message bot pe bhi aayega"}</div><div class="folList">${follows.map(a => `<div class="folRow" data-fol="${esc(a.id)}"><span class="arPic">${a.image ? `<img src="${esc(a.image)}" onerror="this.remove()">` : ""}${typeof PERSON_ICON === "string" ? PERSON_ICON : ""}</span><b>${esc(a.name)}</b><button class="folX" data-act="unfollow" data-id="${esc(a.id)}">Unfollow</button></div>`).join("")}</div>`
+      : `<div class="empty">Abhi kisi artist ko follow nahi kiya. Artist page pe ⭐ Follow dabao — unka naya gaana aate hi bataenge.</div>`}`;
+  relHomeRow(view, true); relLoad();
+}
+const renderLibraryV22 = renderLibrary;
+renderLibrary = function () {
+  if (subView === "following") return renderFollowing();
+  const r = renderLibraryV22.apply(this, arguments);
+  if (!subView && !view.querySelector("[data-open=following]")) {
+    const links = view.querySelector(".libLinks"); const rec = links && links.querySelector("[data-open=recent]");
+    const h = `<button data-open="following" class="folLib"><i class="folI">⭐</i><span>Following <small class="sub">${follows.length ? tr(`${follows.length} artist${follows.length === 1 ? "" : "s"}`) : "Artists"}</small></span></button>`;
+    if (rec) rec.insertAdjacentHTML("afterend", h); else if (links) links.insertAdjacentHTML("beforeend", h);
+  }
+  return r;
+};
+// new releases of followed artists (server keeps per-artist state + sends the bot alerts; this call also triggers that check)
+let relData = store.get("relCache", null), relLast = relData ? relData.at || 0 : 0, relBusy = false;
+function relLoad(force) {
+  if (!follows.length || relBusy || !navigator.onLine) return;
+  if (!force && Date.now() - relLast < 30 * 60e3) return;
+  relBusy = true; relLast = Date.now();
+  post("/api/follow/new", { ids: follows.slice(0, 60).map(a => a.id) }).then(d => {
+    if (d && Array.isArray(d.items)) { relData = { at: Date.now(), items: d.items.slice(0, 20) }; store.set("relCache", relData); if (curTab === "home" && !subView) relHomeRow(view); if (curTab === "library" && subView === "following") relHomeRow(view, true); }
+    if (d && Array.isArray(d.artists)) { let ch = false; for (const a of d.artists) { const f = follows.find(x => x.id === String(a.id)); if (f && a.image && f.image !== a.image) { f.image = a.image; ch = true; } } if (ch) store.set("follows", follows); }
+  }).catch(() => {}).finally(() => { relBusy = false; });
+}
+function relHomeRow(root, inFollowing) {
+  if (!root) return; const old = root.querySelector(".relRow"); if (old) { old.previousElementSibling && old.previousElementSibling.classList.contains("relH") && old.previousElementSibling.remove(); old.remove(); }
+  const items = relData && relData.items ? relData.items.filter(x => follows.some(a => a.id === String(x.aid))) : [];
+  if (!follows.length || !items.length) return;
+  const h = `<h2 class="relH">⭐ Naye gaane — aapke artists</h2><div class="car relRow">${items.slice(0, 15).map(x => `<button class="tile" data-rel="${esc(x.id)}"><img loading="lazy" src="${esc(x.image || "/icon-192.png")}" onerror="this.onerror=null;this.src='/icon-192.png'">${x.isNew ? `<i class="relNew">${esc(tr("Naya gaana"))}</i>` : ""}<div class="t1">${esc(x.title)}</div><div class="t2">${esc(x.aname || x.artist || "")}${x.year ? " · " + esc(x.year) : ""}</div></button>`).join("")}</div>`;
+  const tmp = document.createElement("div"); tmp.innerHTML = h;
+  if (inFollowing) { root.append(...tmp.childNodes); return; }
+  const anchor = root.querySelector("[data-greet]") || root.querySelector("h1.hrow");
+  const after = root.querySelector(".fyHome, .fy, h2"); // place after the greeting, before the first shelf
+  if (after && after.parentNode === root) root.insertBefore(tmp.firstChild, after), root.insertBefore(tmp.firstChild, after);
+  else if (anchor) anchor.after(...tmp.childNodes);
+}
+const renderHomeV22b = renderHome;
+renderHome = function () { const r = renderHomeV22b.apply(this, arguments); try { relHomeRow(view); relLoad(); } catch (e) {} return r; };
+setTimeout(() => { followPull(); relLoad(); }, 4000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) relLoad(); });
+
+// deep links from the bot / share card: ?song=<JioSaavn id> plays it, ?al=<album id> opens the album
+(() => {
+  let sp; try { sp = new URLSearchParams(location.search); } catch (e) { return; }
+  const sid = (sp.get("song") || "").replace(/[^\w-]/g, "").slice(0, 40), al = (sp.get("al") || "").replace(/\D/g, "").slice(0, 15);
+  if (!sid && !al) return;
+  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+  if (al) setTimeout(() => collOpen("al:" + al), 300);
+  if (sid) api("/api/song?id=" + encodeURIComponent(sid)).then(d => { if (d && d.track) { playList([d.track], 0); setTimeout(openNP, 400); } }).catch(() => {});
+})();
+
+// ---------- 6) Share card 📸 (1080×1920 story image) ----------
+function scLoadImg(src) { return new Promise(res => { if (!src) return res(null); const im = new Image(); im.crossOrigin = "anonymous"; im.onload = () => res(im); im.onerror = () => res(null); im.src = src; }); }
+function scWrap(ctx, text, maxW, maxLines) {
+  const words = String(text || "").split(/\s+/).filter(Boolean), lines = []; let cur = "";
+  for (const w of words) { const t = cur ? cur + " " + w : w; if (ctx.measureText(t).width <= maxW || !cur) cur = t; else { lines.push(cur); cur = w; } }
+  if (cur) lines.push(cur);
+  if (lines.length > maxLines) { const l = lines.slice(0, maxLines); let s = l[maxLines - 1]; while (s.length > 1 && ctx.measureText(s + "…").width > maxW) s = s.slice(0, -1); l[maxLines - 1] = s + "…"; return l; }
+  return lines.map(s => { let x = s; if (ctx.measureText(x).width <= maxW) return x; while (x.length > 1 && ctx.measureText(x + "…").width > maxW) x = x.slice(0, -1); return x + "…"; });
+}
+function scRound(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+async function shareCardDraw(t, line) {
+  const W = 1080, H = 1920, cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d");
+  const big = String(t.thumb || "").replace(/(150x150|50x50)/, "500x500") || ytThumb(t.id);
+  try { await Promise.all([document.fonts.load('700 64px "DhunComic"'), document.fonts.load('400 40px "DhunComic"')]); } catch (e) {}
+  const [art, mark] = await Promise.all([scLoadImg(big), scLoadImg(V23_NATIVE ? "/dhun-mark.png" : "/dhun-mark.webp?v=16")]);
+  ctx.fillStyle = "#0b0710"; ctx.fillRect(0, 0, W, H);
+  if (art) { // blurred background: draw tiny, scale up (works everywhere, no canvas filter needed)
+    const s = document.createElement("canvas"); s.width = 18; s.height = 32; const sx = s.getContext("2d"); sx.drawImage(art, art.width * 0.2, 0, art.width * 0.6, art.height, 0, 0, 18, 32);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.globalAlpha = 0.95; ctx.drawImage(s, -40, -40, W + 80, H + 80); ctx.globalAlpha = 1;
+  }
+  let g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "rgba(10,6,16,.25)"); g.addColorStop(0.55, "rgba(10,6,16,.45)"); g.addColorStop(1, "rgba(8,5,12,.92)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const A = 760, ax = (W - A) / 2, ay = line ? 230 : 330;
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = 70; ctx.shadowOffsetY = 30; scRound(ctx, ax, ay, A, A, 44); ctx.fillStyle = "#222"; ctx.fill(); ctx.restore();
+  ctx.save(); scRound(ctx, ax, ay, A, A, 44); ctx.clip(); if (art) ctx.drawImage(art, ax, ay, A, A); else { ctx.fillStyle = "#2a2030"; ctx.fillRect(ax, ay, A, A); } ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.lineWidth = 2; scRound(ctx, ax + 1, ay + 1, A - 2, A - 2, 43); ctx.stroke();
+  let y = ay + A + 110; ctx.textAlign = "center"; ctx.fillStyle = "#fff";
+  ctx.font = '700 66px "DhunComic", "Comic Neue", system-ui, sans-serif';
+  for (const l of scWrap(ctx, t.title, W - 160, 2)) { ctx.fillText(l, W / 2, y); y += 78; }
+  ctx.font = '400 42px "DhunComic", "Comic Neue", system-ui, sans-serif'; ctx.fillStyle = "rgba(255,255,255,.72)";
+  for (const l of scWrap(ctx, t.artist || "", W - 200, 1)) { ctx.fillText(l, W / 2, y + 4); y += 56; }
+  if (line) { // lyric line on a glass card
+    ctx.font = 'italic 700 52px "DhunComic", "Comic Neue", system-ui, sans-serif';
+    const ls = scWrap(ctx, "“" + line + "”", W - 260, 4), ch = ls.length * 66 + 70, cy = y + 30;
+    ctx.save(); scRound(ctx, 90, cy, W - 180, ch, 40); ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
+    const gl = ctx.createLinearGradient(90, cy, 90, cy + 40); gl.addColorStop(0, "rgba(255,255,255,.18)"); gl.addColorStop(1, "rgba(255,255,255,0)"); ctx.save(); scRound(ctx, 90, cy, W - 180, ch, 40); ctx.clip(); ctx.fillStyle = gl; ctx.fillRect(90, cy, W - 180, 40); ctx.restore();
+    ctx.fillStyle = "#fff"; let ly = cy + 76; for (const l of ls) { ctx.fillText(l, W / 2, ly); ly += 66; }
+  }
+  // footer: logo + Dhun + Mavi💖 + link
+  const fy = H - 170;
+  if (mark) { const mh = 86, mw = mark.width * mh / mark.height; ctx.drawImage(mark, W / 2 - mw - 70, fy - mh + 18, mw, mh); }
+  ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = '700 58px "DhunComic", "Comic Neue", system-ui, sans-serif'; ctx.fillText("Dhun", W / 2 - 50, fy);
+  ctx.font = '400 30px "DhunComic", "Comic Neue", system-ui, sans-serif'; ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fillText("Mavi💖", W / 2 + 100, fy - 4);
+  ctx.textAlign = "center"; ctx.font = '700 36px "DhunComic", "Comic Neue", system-ui, sans-serif'; ctx.fillStyle = "#fa2d48"; ctx.fillText("dhun.sites.tab.bot", W / 2, fy + 78);
+  return cv;
+}
+async function shareCard(t, line) {
+  if (!t) return;
+  toast(tr("Card bana raha hoon…"));
+  let cv; try { cv = await shareCardDraw(t, line); } catch (e) { toast(tr("Card nahi ban paya 😕")); return; }
+  const url = cv.toDataURL("image/png");
+  const link = t.src === "saavn" ? `https://dhun.sites.tab.bot/?song=${encodeURIComponent(t.id)}` : "https://dhun.sites.tab.bot/";
+  showSheet(`<div class="sgroup scBox"><img class="scPrev" src="${url}" alt=""><div class="scBtns"><button data-s="share" class="scGo">${esc(tr("Share karo"))} ${ICON.share}</button><button data-s="save">${esc(tr("Save karo"))} ${ICON.dl || ""}</button></div>${line ? `<button data-s="noline">${esc(tr("Line hatao"))}</button>` : ""}</div>`, {
+    share: () => { scShare(cv, t, link); },
+    save: () => { scSave(cv, t); },
+    noline: () => { setTimeout(() => shareCard(t, ""), 60); },
+  });
+  window.__v23sc = { w: cv.width, h: cv.height, line: line || "", link };
+}
+function scName(t) { return "dhun-" + String(t.title || "song").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) + ".png"; }
+function scShare(cv, t, link) {
+  if (V23_NATIVE && window.DhunNative && window.DhunNative.shareImage) { window.DhunNative.shareImage(cv, `${t.title} — ${t.artist} 🎶\n${link}`).catch(() => toast(tr("Card nahi ban paya 😕"))); return; }
+  cv.toBlob(b => {
+    if (!b) return toast(tr("Card nahi ban paya 😕"));
+    const f = new File([b], scName(t), { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) navigator.share({ files: [f], title: t.title, text: `${t.title} — ${t.artist} 🎶 ${link}` }).catch(() => {});
+    else scSave(cv, t);
+  }, "image/png");
+}
+function scSave(cv, t) {
+  if (V23_NATIVE && window.DhunNative && window.DhunNative.shareImage) { window.DhunNative.shareImage(cv, "").catch(() => {}); return; } // Android: the share sheet has "Save to gallery / Files"
+  cv.toBlob(b => { if (!b) return; const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = scName(t); document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); toast(tr("Card save ho gaya 📸")); }, "image/png");
+}
+
+// ---------- 7) Playback speed ⏩ + Bass Boost 🔊 ----------
+let pbRate = +store.get("rate", 1) || 1;
+const RATES = [0.75, 0.9, 1, 1.1, 1.25, 1.5];
+const rateLabel = r => (Math.round(r * 100) / 100).toString().replace(/^0\./, ".") + "×";
+function rateWant() { if (typeof jamOn === "function" && jamOn()) return null; if (window.__pod && queue[qi] && queue[qi].src === "pod") return null; return pbRate; }
+function rateApply() {
+  const r = rateWant(); if (r == null) return;
+  for (const el of [audio, mixPre]) { if (!el) continue; try { el.preservesPitch = true; el.mozPreservesPitch = true; el.webkitPreservesPitch = true; if (Math.abs(el.playbackRate - r) > 0.001) el.playbackRate = r; el.defaultPlaybackRate = r; } catch (e) {} }
+}
+const rateWired = new WeakSet();
+setInterval(() => { if (!rateWired.has(audio)) { rateWired.add(audio); ["loadedmetadata", "playing", "ratechange"].forEach(ev => audio.addEventListener(ev, () => setTimeout(rateApply, 0))); } rateApply(); }, 1000);
+function setRate(r) { pbRate = r; store.set("rate", r); rateApply(); toast(tr(`Speed ${rateLabel(r)} ⏩`)); }
+function speedSheet() {
+  const jam = typeof jamOn === "function" && jamOn();
+  showSheet(`<div class="sgroup"><div class="shead"><div><div class="t1">⏩ ${esc(tr("Playback speed"))}</div><div class="sub">${esc(tr(jam ? "Listen Together me speed 1× rehti hai" : "Awaaz ki pitch same rahegi"))}</div></div></div><div class="pchips rateChips">${RATES.map(r => `<button class="pchip${Math.abs(r - pbRate) < 0.001 ? " on" : ""}" data-s="r" data-r="${r}">${rateLabel(r)}</button>`).join("")}</div></div>`, { r: b => { setRate(+b.dataset.r); } });
+}
+function bassOn() { return eqOn && eqPreset === "Bass Boost"; }
+function bassToggle() {
+  if (bassOn()) { setEq(false); toast(tr("Bass Boost off")); }
+  else { setPreset("Bass Boost"); setEq(true); toast(tr(cfg.automix !== false && mixVolOK ? "Bass Boost on — AutoMix tab tak band rahega (EQ ke saath mix nahi hota)" : "Bass Boost on 🔊"), 3600); }
+  if (curTab === "library" && subView === "settings") rerender();
+}
+
+// ---------- song menu additions (ℹ️ info, 📸 share card, ⏩ speed, 🔊 bass) ----------
+const openTrackSheetV22 = openTrackSheet;
+openTrackSheet = function (t, ctx, idx) {
+  const r = openTrackSheetV22.apply(this, arguments);
+  if (!t) return r;
+  const grp = sheet.querySelector(".sgroup"); if (!grp) return r;
+  const isNp = ctx === "np" && queue[qi] && queue[qi].id === t.id, pod = t.src === "pod";
+  const add = (key, html, fn, before) => { const tmp = document.createElement("div"); tmp.innerHTML = html; const b = tmp.firstChild; const ref = before && grp.querySelector(before); if (ref) grp.insertBefore(b, ref); else grp.appendChild(b); extra[key] = fn; };
+  const extra = {};
+  if (!pod) add("info", `<button data-s="v23info">ℹ️ Song info ${ICON.note}</button>`, () => songInfo(t), "[data-s=like]");
+  add("card", `<button data-s="v23card">📸 Share card ${ICON.share}</button>`, () => { const lt = isNp && lyrOpenNow && lyr2.items && lyr2.cur >= 0 && lyr2.items[lyr2.cur] && lyr2.items[lyr2.cur].x || ""; setTimeout(() => shareCard(t, lt), 60); }, "[data-s=share]");
+  if (isNp && !pod) {
+    add("speed", `<button data-s="v23speed">${esc(tr("⏩ Speed: " + rateLabel(pbRate)))} <i class="sbI">⏩</i></button>`, () => setTimeout(speedSheet, 60));
+    add("bass", `<button data-s="v23bass">${esc(tr("🔊 Bass Boost: " + (bassOn() ? "On" : "Off")))} <i class="sbI">🔊</i></button>`, () => bassToggle());
+  }
+  const oc = sheet.onclick;
+  sheet.onclick = e => {
+    const b = e.target.closest("[data-s]"); const k = b && b.dataset.s;
+    const map = { v23info: "info", v23card: "card", v23speed: "speed", v23bass: "bass" };
+    if (k && map[k] && extra[map[k]]) { closeSheet(); extra[map[k]](); return; }
+    return oc && oc(e);
+  };
+  return r;
+};
+
+// ---------- 8) Queue edit 📋: drag to reorder, swipe left to remove, Clear queue ----------
+const renderQueueV22 = renderQueue;
+renderQueue = function () {
+  const r = renderQueueV22.apply(this, arguments);
+  const list = $("#queueList"), head = document.querySelector("#queuePanel .qHead"); if (!list) return r;
+  const jam = typeof jamOn === "function" && jamOn();
+  list.classList.toggle("qEdit", !jam);
+  if (!jam) list.querySelectorAll(".row[data-ctx=queue]").forEach(row => { if (!row.querySelector(".qh")) row.insertAdjacentHTML("beforeend", `<i class="qh" aria-label="Drag"><svg viewBox="0 0 24 24"><path d="M4 7h16v2H4zm0 4h16v2H4zm0 4h16v2H4z"/></svg></i>`); });
+  if (head && !head.querySelector(".qClear")) head.insertAdjacentHTML("beforeend", `<button class="qClear" data-qclear>${esc(tr("Clear queue"))}</button>`);
+  const qc = head && head.querySelector(".qClear"); if (qc) qc.style.display = !jam && queue.length - qi > 1 ? "" : "none";
+  return r;
+};
+(() => {
+  const list = $("#queueList"), panel = $("#queuePanel"); if (!list || !panel) return;
+  panel.addEventListener("click", e => { if (e.target.closest("[data-qclear]")) { e.stopPropagation(); if (typeof jamOn === "function" && jamOn()) return; const n = queue.length - qi - 1; if (n <= 0) return; queue = queue.slice(0, qi + 1); autoplayAdded.delete && queue[qi] && autoplayAdded.add(queue[qi].id); saveQ(); renderQueue(); toast(tr("Queue saaf ✅")); } });
+  let g = null, sup = 0;
+  const rowsOf = () => [...list.querySelectorAll(".row[data-ctx=queue]")];
+  list.addEventListener("click", e => { if (Date.now() - sup < 400) { e.stopPropagation(); e.preventDefault(); } }, true);
+  list.addEventListener("touchstart", e => {
+    if (typeof jamOn === "function" && jamOn()) return;
+    const row = e.target.closest(".row[data-ctx=queue]"); if (!row || e.touches.length > 1) return;
+    const p = e.touches[0], handle = e.target.closest(".qh");
+    g = { row, handle: !!handle, x: p.clientX, y: p.clientY, dx: 0, dy: 0, mode: handle ? "drag" : null, rows: rowsOf(), h: row.offsetHeight, from: rowsOf().indexOf(row), to: -1 };
+    if (handle) { row.classList.add("qLift"); g.to = g.from; }
+  }, { passive: true });
+  list.addEventListener("touchmove", e => {
+    if (!g) return; const p = e.touches[0]; g.dx = p.clientX - g.x; g.dy = p.clientY - g.y;
+    if (!g.mode) { if (Math.abs(g.dx) > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4) g.mode = "swipe"; else if (Math.abs(g.dy) > 10) { g = null; return; } }
+    if (g.mode === "drag") {
+      e.preventDefault();
+      g.row.style.transform = `translateY(${g.dy}px) scale(1.02)`;
+      const to = Math.max(0, Math.min(g.rows.length - 1, g.from + Math.round(g.dy / g.h))); g.to = to;
+      g.rows.forEach((r, i) => { if (r === g.row) return; let s = 0; if (g.from < to && i > g.from && i <= to) s = -g.h; if (g.from > to && i < g.from && i >= to) s = g.h; r.style.transform = s ? `translateY(${s}px)` : ""; });
+    } else if (g.mode === "swipe") {
+      e.preventDefault();
+      const dx = Math.min(0, g.dx); g.row.style.transform = `translateX(${dx}px)`; g.row.style.opacity = String(Math.max(0.25, 1 + dx / 320)); g.row.classList.toggle("qDel", dx < -90);
+    }
+  }, { passive: false });
+  const end = () => {
+    if (!g) return; const s = g; g = null;
+    s.rows.forEach(r => { r.style.transform = ""; r.style.opacity = ""; }); s.row.classList.remove("qLift", "qDel");
+    if (s.mode === "drag") {
+      sup = Date.now();
+      if (s.to >= 0 && s.to !== s.from) { const a = qi + 1 + s.from, b = qi + 1 + s.to; const [m] = queue.splice(a, 1); queue.splice(b, 0, m); saveQ(); renderQueue(); prepNext(); }
+    } else if (s.mode === "swipe") {
+      sup = Date.now();
+      if (s.dx < -90) { const i = qi + 1 + s.from, t = queue[i]; if (t) { queue.splice(i, 1); saveQ(); renderQueue(); prepNext(); toast(tr(`“${t.title}” queue se hataya`)); } }
+    }
+  };
+  list.addEventListener("touchend", end, { passive: true }); list.addEventListener("touchcancel", end, { passive: true });
+})();
+
+// Next on the last song (repeat off): continue with similar songs (autoplay) instead of jumping back to the first song
+const nextV22 = next;
+next = function (auto) {
+  const t = queue[qi];
+  if (!auto && repeat === 0 && t && qi === queue.length - 1 && navigator.onLine && t.src !== "pod" && !(typeof jamOn === "function" && jamOn())) {
+    status("Loading…");
+    api(radioURL(t)).then(d => { if (queue[qi] !== t) return; const add = freshSongs(d.items, queue).slice(0, 20).map(slim); if (!add.length) return nextV22(auto); queue.push(...add); qi++; saveQ(); loadCurrent(true); }).catch(() => { if (queue[qi] === t) nextV22(auto); });
+    return;
+  }
+  return nextV22.apply(this, arguments);
+};
+
+// ---------- 9) Search: recent searches (remove one / clear all) + voice search 🎙️ ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voiceNative = () => (V23_NATIVE && window.DhunNative && window.DhunNative.voice) || null;
+let voiceNatOK = false; if (voiceNative()) voiceNative().available().then(ok => { voiceNatOK = !!ok; if (ok && curTab === "search") renderSearchBody(); }).catch(() => {});
+const voiceOK = () => V23_NATIVE ? voiceNatOK : !!SR;
+const renderSearchV22 = renderSearch;
+renderSearch = function () {
+  const r = renderSearchV22.apply(this, arguments);
+  const box = view.querySelector(".searchBox");
+  if (box && voiceOK() && !box.querySelector(".micBtn")) box.insertAdjacentHTML("beforeend", `<button class="icon micBtn" data-act="voice" aria-label="Voice search"><svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 006 6.92V21h2v-3.08A7 7 0 0019 11h-2z"/></svg></button>`);
+  const s = searchState, sb = $("#sbody");
+  if (sb && !s.q && !(s.typing && suggestions.length)) {
+    const h2 = [...sb.querySelectorAll("h2")].find(h => h.querySelector("[data-act=clearSearches]"));
+    if (h2 && h2.nextElementSibling && h2.nextElementSibling.classList.contains("sugg")) {
+      h2.nextElementSibling.outerHTML = `<div class="sugg recentS">${searches.slice(0, 8).map((x, i) => `<div class="rsRow"><button data-sq="${esc(x)}">${ICON.clock}${esc(x)}</button><button class="rsX" data-act="rmSearch" data-i="${i}" aria-label="Remove">✕</button></div>`).join("")}</div>`;
+      const c = h2.querySelector("[data-act=clearSearches]"); if (c) c.textContent = tr("Clear all");
+    }
+  }
+  return r;
+};
+view.addEventListener("click", e => {
+  const a = e.target.closest("[data-act]"); if (!a) return; const k = a.dataset.act;
+  if (k === "rmSearch") { e.preventDefault(); e.stopPropagation(); searches.splice(+a.dataset.i, 1); store.set("searches", searches); renderSearchBody(); return; }
+  if (k === "voice") { e.preventDefault(); e.stopPropagation(); voiceSearch(); return; }
+}, true);
+let voiceRec = null;
+function voiceUI(txt, sub) {
+  let o = $("#v23voice");
+  if (txt == null) { if (o) o.remove(); return; }
+  if (!o) { o = document.createElement("div"); o.id = "v23voice"; o.innerHTML = `<div class="vvBox"><div class="vvPulse"><i></i><svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 006 6.92V21h2v-3.08A7 7 0 0019 11h-2z"/></svg></div><b></b><small></small><button class="vvX">${esc(tr("Cancel"))}</button></div>`; document.body.appendChild(o); o.querySelector(".vvX").onclick = () => { try { voiceRec && voiceRec.abort(); } catch (e) {} try { pehStop && pehStop(true); } catch (e) {} voiceUI(null); }; }
+  o.querySelector("b").textContent = tr(txt); o.querySelector("small").textContent = sub ? tr(sub) : "";
+}
+async function voiceSearch() {
+  const lang = appLang === "hi" ? "hi-IN" : "en-IN";
+  const nat = voiceNative();
+  if (nat) { try { const tx = await nat.listen(lang, tr("Bolo… gaane ka naam")); if (tx) doSearch(tx); } catch (e) { const m = String((e && (e.code || e.message)) || e); if (!/cancel/i.test(m)) toast(tr(/unavailable/i.test(m) ? "Ye feature abhi band hai" : "Awaaz samajh nahi aayi, dobara bolo")); } return; }
+  if (!SR) return;
+  try { voiceRec && voiceRec.abort(); } catch (e) {}
+  const rec = new SR(); voiceRec = rec; rec.lang = lang; rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = false;
+  let final = "", heard = "";
+  voiceUI("Bolo… gaane ka naam", "Sun raha hoon…");
+  rec.onresult = ev => { let s = ""; for (let i = 0; i < ev.results.length; i++) { s += ev.results[i][0].transcript; if (ev.results[i].isFinal) final = s; } heard = s; const o = $("#v23voice small"); if (o) o.textContent = s; };
+  rec.onerror = ev => { voiceUI(null); toast(tr(ev && /not-allowed|service-not-allowed/.test(ev.error) ? "Mic ki permission chahiye" : "Awaaz samajh nahi aayi, dobara bolo")); };
+  rec.onend = () => { voiceUI(null); const q = (final || heard).trim(); if (q) doSearch(q); voiceRec = null; };
+  try { rec.start(); } catch (e) { voiceUI(null); }
+}
+// ---------- 10) Android home-screen widget: wired in native.js through the lock-screen (media session) shim ----------
+
+// ---------- 11) Settings: language row; AutoMix note; Android app banner on the website ----------
+const renderLibraryV23a = renderLibrary;
+renderLibrary = function () {
+  const r = renderLibraryV23a.apply(this, arguments);
+  if (subView !== "settings" || view.querySelector(".langCard")) return r;
+  const first = view.querySelector("h2");
+  const h = `<h2>🌐 Language</h2><div class="setCard langCard"><div class="setLbl">App ki bhasha</div><div class="seg langSeg" data-notr>${LANGS.map(([k, n]) => `<button data-act="lang" data-l="${k}" class="${appLang === k ? "on" : ""}">${esc(n)}</button>`).join("")}</div></div>`;
+  if (first) first.insertAdjacentHTML("beforebegin", h); else view.insertAdjacentHTML("beforeend", h);
+  const am = view.querySelector("[data-act=automix]");
+  if (am && mixVolOK && !view.querySelector(".mixNote2")) am.insertAdjacentHTML("afterend", `<div class="setNote mixNote2">${appLang === "hi" ? "नया: बीट पर मिक्स, अगले गाने की ख़ामोशी छोड़ी जाती है, और जाते गाने का बेस धीरे-धीरे हटता है (DJ जैसा)। EQ / बेस बूस्ट चालू हो तो ऑटोमिक्स बंद रहता है।" : appLang === "en" ? "New: blends start on the beat, the next song's silence is skipped and the outgoing song's bass sweeps out (DJ-style). AutoMix pauses while EQ / Bass Boost is on." : "Naya: beat pe mix, agle gaane ki khamoshi skip, aur jaate gaane ka bass dheere-dheere hat-ta hai (DJ jaisa). EQ / Bass Boost on ho to AutoMix band rehta hai."}</div>`);
+  return r;
+};
+view.addEventListener("click", e => { const b = e.target.closest("[data-act=lang]"); if (!b) return; e.preventDefault(); e.stopPropagation(); setLang(b.dataset.l); toast(tr("Bhasha badal di ✅")); }, true);
+(() => { // website on an Android phone browser (not the app): suggest the app
+  if (V23_NATIVE) return;
+  const ua = navigator.userAgent || ""; if (!/Android/i.test(ua) || /; wv\)|DhunApp/i.test(ua)) return;
+  if (Date.now() < +store.get("appBanUntil", 0)) return;
+  setTimeout(() => {
+    api("/api/app-version").then(v => {
+      const mb = v && (v.size || v.bytes) ? (Math.round((v.size || v.bytes) / 1048576 * 10) / 10) + " MB" : "";
+      const el = document.createElement("div"); el.id = "appBan";
+      el.innerHTML = `<img src="/icon-192.png" alt=""><div><b>${esc(appLang === "hi" ? "Dhun ऐप डाउनलोड करें" : appLang === "en" ? "Get the Dhun app" : "Dhun app download karo")}</b><small>${esc(appLang === "hi" ? "बेहतर आवाज़, ऑफ़लाइन गाने, होम-स्क्रीन विजेट" : appLang === "en" ? "Better sound, offline songs, home-screen widget" : "Better sound, offline gaane, home-screen widget")}${mb ? " · " + mb : ""}</small></div><a href="/dhun.apk" class="abGo" download>${esc(appLang === "hi" ? "डाउनलोड" : "Download")}</a><button class="abX" aria-label="Close">✕</button>`;
+      document.body.appendChild(el); requestAnimationFrame(() => el.classList.add("show"));
+      const bye = () => { store.set("appBanUntil", Date.now() + 7 * 864e5); el.classList.remove("show"); setTimeout(() => el.remove(), 400); };
+      el.querySelector(".abX").onclick = bye; el.querySelector(".abGo").addEventListener("click", () => setTimeout(bye, 300));
+      setTimeout(() => { if (el.isConnected) { el.classList.remove("show"); setTimeout(() => el.remove(), 400); } }, 20000); // shows again next visit unless dismissed
+    }).catch(() => {});
+  }, 3500);
+})();
+window.__v23 = { tr, setLang, get lang() { return appLang; }, lyr: lyr2, lyrBuild, mixAnaBuf, mixPlan, songInfo, shareCard, shareCardDraw, followToggle, get follows() { return follows; }, relLoad, get rel() { return relData; }, setRate, get rate() { return pbRate; }, bassToggle, bassOn, voiceOK };
+
+// ---------- 12) Liquid Glass chrome: tab bar shrinks while scrolling down, large titles collapse into a glass nav bar; weak-phone mode ----------
+(() => {
+  try { if ((navigator.deviceMemory && navigator.deviceMemory <= 2) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)) document.documentElement.classList.add("lite"); } catch (e) {}
+  const nav = document.createElement("div"); nav.id = "v23nav"; nav.setAttribute("aria-hidden", "true"); document.getElementById("app").appendChild(nav);
+  let lastY = 0, raf = 0;
+  const upd = () => {
+    raf = 0; const y = view.scrollTop, dy = y - lastY; lastY = y;
+    if (y < 40 || dy < -6) document.body.classList.remove("tabsMini"); else if (dy > 6 && y > 120) document.body.classList.add("tabsMini");
+    const h1 = view.querySelector("h1"); const show = !!h1 && h1.getBoundingClientRect().bottom < (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--st")) || 0) + 30;
+    if (show) { const t = (h1.childNodes[0] && h1.childNodes[0].nodeType === 3 ? h1.childNodes[0].textContent : h1.textContent).trim(); if (nav.textContent !== t) nav.textContent = t; }
+    nav.classList.toggle("show", show);
+  };
+  view.addEventListener("scroll", () => { if (!raf) raf = requestAnimationFrame(upd); }, { passive: true });
+  new MutationObserver(() => { lastY = view.scrollTop; document.body.classList.remove("tabsMini"); if (!raf) raf = requestAnimationFrame(upd); }).observe(view, { childList: true });
+})();
+
+// ================= v23: Podcasts 🎙️ =================
+// ---------- 🎙️ Podcasts (Apple Podcasts directory; episodes play through the same player) ----------
+// Episode track: {id:"pod:<hash>", src:"pod", title, artist:<show>, album:<show>, thumb, url:<enclosure>, dur}
+// Stored: m_podSubs [{id,title,author,image}], m_podPos {id:{pos,dur,at,done,t,s,n,d}}, m_podRate, m_podHomeCache
+const POD_S = { // all podcast UI words in one place (for the language switch)
+  title: "Podcasts", sub: "Kahaniyan, comedy, gyaan — sab free", lib: "Podcasts", libSub: n => n ? `${n} follow kiye` : "Kahaniyan, comedy, gyaan",
+  search: "Podcast dhoondo…", cont: "Continue listening", yours: "Aapke podcasts", cats: "Categories", results: q => `“${q}” ke results`,
+  none: "Kuch nahi mila 😕", err: "Load nahi hua — internet check karo", retry: "Dobara try karo", loading: "La raha hoon…",
+  follow: "＋ Follow", following: "✓ Following", followed: "Follow kar liya 🎙️", unfollowed: "Unfollow kar diya",
+  latest: "Latest episode", resume: "Resume", eps: n => `${n} episode${n === 1 ? "" : "s"}`, episodes: "Episodes", more: "Aur episodes",
+  played: "✓ Played", left: m => `${m} baaki`, back: "Podcasts", backLib: "Library", backSearch: "Search",
+  showMore: "aur padho", showLess: "kam dikhao", noNotes: "Is episode ke notes nahi hain", notesHead: "🎙️ Episode notes",
+  jam: "Listen Together me podcast nahi chalta — pehle session band karo", fail: "Episode nahi chal paya 😕 thodi der baad try karo",
+  speed: r => `Speed ${r}×`, openShow: "🎙️ Show kholo", markPlayed: "✓ Played mark karo", markUnplayed: "↺ Unplayed mark karo",
+  noLike: "Podcast episodes Liked Songs me nahi jaate", noDl: "Podcast episodes Telegram pe download nahi hote", queueEnd: "Episode khatam ✓",
+  upNext: "Iske baad koi episode nahi — queue khatam pe ruk jayega", today: "Aaj", yday: "Kal", daysAgo: n => `${n} din pehle`,
+};
+const POD_ICON = '<svg viewBox="0 0 24 24"><path d="M12 2a3.5 3.5 0 013.5 3.5v6a3.5 3.5 0 01-7 0v-6A3.5 3.5 0 0112 2zm6.5 9.5h2a8.5 8.5 0 01-7.5 8.44V22h-2v-2.06A8.5 8.5 0 013.5 11.5h2a6.5 6.5 0 0013 0z"/></svg>';
+const POD_B15 = '<svg viewBox="0 0 24 24"><path d="M12 4.5V1.5L7.5 5.5l4.5 4V6.5a6.5 6.5 0 11-6.5 6.5h-2a8.5 8.5 0 108.5-8.5z"/><text x="12.2" y="16.6" font-size="6.6" font-weight="700" text-anchor="middle" font-family="-apple-system,Roboto,sans-serif">15</text></svg>';
+const POD_F30 = '<svg viewBox="0 0 24 24"><path d="M12 4.5V1.5l4.5 4-4.5 4V6.5a6.5 6.5 0 106.5 6.5h2A8.5 8.5 0 1112 4.5z"/><text x="11.8" y="16.6" font-size="6.6" font-weight="700" text-anchor="middle" font-family="-apple-system,Roboto,sans-serif">30</text></svg>';
+const POD_RATES = [1, 1.25, 1.5, 1.75, 2, 0.75];
+const isPod = t => !!(t && (t.src === "pod" || /^pod:/.test(String(t.id || ""))));
+let podSubs = store.get("podSubs", []), podPos = store.get("podPos", {}), podRate = +store.get("podRate", 1) || 1;
+if (!POD_RATES.includes(podRate)) podRate = 1;
+let podHome = store.get("podHomeCache", null), podHomeBusy = false, podHomeErr = false;
+const podShows = new Map(); // show id -> {data} | {loading} | {err}
+const podSt = { q: "", items: null, busy: false, err: false, gkey: "", gtitle: "", show: 50, descOpen: false };
+const podProxy = u => (typeof API_BASE === "string" ? API_BASE : "") + "/api/pod/a?u=" + encodeURIComponent(u);
+const podSrc = u => !u ? "" : (eqRouted || (/^http:/i.test(u) && location.protocol !== "http:")) ? podProxy(u) : u;
+const podSavePos = () => { const ks = Object.keys(podPos); if (ks.length > 400) ks.sort((a, b) => (podPos[a].at || 0) - (podPos[b].at || 0)).slice(0, ks.length - 400).forEach(k => delete podPos[k]); store.set("podPos", podPos); };
+const podMin = s => { s = Math.max(0, Math.round(s || 0)); if (s < 60) return s ? `${s} sec` : ""; const m = Math.round(s / 60), h = Math.floor(m / 60); return h ? `${h} hr${m % 60 ? " " + (m % 60) + " min" : ""}` : `${m} min`; };
+const podDate = ms => { if (!ms) return ""; const d = new Date(ms), now = new Date(), day = 864e5; const a = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime(), b = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); const n = Math.round((a - b) / day); if (n === 0) return POD_S.today; if (n === 1) return POD_S.yday; if (n > 1 && n < 7) return POD_S.daysAgo(n); return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" }); };
+const podArtS = (u, s = 300) => String(u || "").replace(/\/600x600bb\.jpg$/, `/${s}x${s}bb.jpg`);
+const podSubbed = id => podSubs.some(x => x.id === String(id));
+function podTrack(show, e) { return { id: "pod:" + e.k, src: "pod", title: e.title || "Episode", artist: show.title || "Podcast", album: show.title || "", dur: e.dur || 0, thumb: e.image || show.image || "", url: e.url }; }
+function podRemember(show, e, t) { const o = podPos[t.id] || (podPos[t.id] = { pos: 0 }); o.t = slim(t); o.s = String(show.id || ""); o.n = e.desc || ""; o.d = e.date || 0; o.dur = o.dur || e.dur || 0; if (!o.at) o.at = Date.now(); }
+function podResume(id) { const o = podPos[id]; if (!o || o.done) return 0; const d = o.dur || 0; return o.pos > 5 && (!d || o.pos < d - 8) ? Math.max(0, o.pos - 2) : 0; }
+function podProgress(id, dur) { const o = podPos[id]; if (!o) return null; const d = o.dur || dur || 0; return { pos: o.pos || 0, dur: d, done: !!o.done, pct: d ? Math.min(100, (o.pos || 0) / d * 100) : 0 }; }
+function podRecord(force) { // remember where the episode is (every few seconds while it plays, on pause/seek)
+  const t = queue[qi]; if (!isPod(t) || mode !== "audio" || !audio.src || audio.readyState < 1) return;
+  const cur = audio.currentTime || 0, d = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (t.dur || 0);
+  const o = podPos[t.id] || (podPos[t.id] = { t: slim(t) });
+  if (cur < 1 && (o.pos || 0) > 5 && !force) return; // freshly loaded, not yet at its resume point
+  o.pos = Math.round(cur); if (d) o.dur = Math.round(d); o.at = Date.now(); if (!o.t) o.t = slim(t);
+  if (d && cur / d > 0.95) o.done = 1; else if (o.done && cur > 5 && d && cur < d * 0.9) o.done = 0;
+  podSavePos();
+}
+function podMarkDone(id, on) { const o = podPos[id] || (podPos[id] = { pos: 0 }); if (on === false) { o.done = 0; o.pos = 0; } else { o.done = 1; if (o.dur) o.pos = o.dur; } o.at = Date.now(); podSavePos(); }
+function podContinue() { return Object.entries(podPos).filter(([id, o]) => o && o.t && !o.done && (o.pos || 0) >= 10).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, 12).map(([id, o]) => ({ id, ...o })); }
+
+// ----- data -----
+function podLoadHome(force) {
+  if (podHomeBusy || (!force && podHome && Date.now() - (podHome.at || 0) < 6 * 3600e3)) return;
+  podHomeBusy = true; podHomeErr = false;
+  api("/api/pod/top").then(d => { if (d && d.rows && d.rows.length) { podHome = { rows: d.rows, genres: d.genres || [], at: Date.now() }; store.set("podHomeCache", podHome); } else podHomeErr = !podHome; })
+    .catch(() => { podHomeErr = !podHome; }).finally(() => { podHomeBusy = false; podRefresh("pods"); });
+}
+function podLoadShow(id, force) {
+  const c = podShows.get(id); if (c && (c.loading || (c.data && !force))) return;
+  podShows.set(id, { loading: 1, data: c && c.data });
+  api("/api/pod/show?id=" + encodeURIComponent(id)).then(d => { if (!d || d.error || !d.episodes) throw new Error(d && d.error || "x"); podShows.set(id, { data: d }); const s = podSubs.find(x => x.id === id); if (s && d.image) { s.image = d.image; s.title = d.title || s.title; store.set("podSubs", podSubs); } })
+    .catch(() => podShows.set(id, { err: 1, data: c && c.data })).finally(() => podRefresh("pod:" + id));
+}
+function podSearchRun(q) {
+  q = String(q || "").trim(); podSt.q = q; podSt.gkey = ""; podSt.items = null; podSt.err = false; podSt.show = 50;
+  if (!q) return podRefresh("pods");
+  podSt.busy = true; podRefresh("pods"); const my = (podSt.tok = Math.random());
+  api("/api/pod/search?q=" + encodeURIComponent(q)).then(d => { if (my === podSt.tok) podSt.items = d.items || []; }).catch(() => { if (my === podSt.tok) podSt.err = true; })
+    .finally(() => { if (my === podSt.tok) { podSt.busy = false; podRefresh("pods"); } });
+}
+function podGenre(key, title) {
+  podSt.q = ""; podSt.gkey = key; podSt.gtitle = title || key; podSt.items = null; podSt.err = false; podSt.busy = true; podRefresh("pods"); view.scrollTop = 0;
+  const my = (podSt.tok = Math.random());
+  api("/api/pod/top?genre=" + encodeURIComponent(key)).then(d => { if (my === podSt.tok) podSt.items = d.items || []; }).catch(() => { if (my === podSt.tok) podSt.err = true; })
+    .finally(() => { if (my === podSt.tok) { podSt.busy = false; podRefresh("pods"); } });
+}
+function podRefresh(which) { if (!podIsView()) return; if (which && which !== subView && !(which === "pods" && subView === "pods")) return; podRender(); }
+const podIsView = () => (curTab === "library" || curTab === "search") && typeof subView === "string" && (subView === "pods" || subView.startsWith("pod:"));
+
+// ----- views -----
+function podTileHTML(s, big) { return `<button class="podTile${big ? " big" : ""}" data-pod="show" data-id="${esc(s.id)}"><img loading="lazy" src="${esc(podArtS(s.image))}" onerror="this.onerror=null;this.src='/icon-192.png'" alt=""><div class="t1">${esc(s.title)}</div><div class="t2">${esc(s.author || s.genre || "")}</div></button>`; }
+function podContHTML() {
+  const c = podContinue(); if (!c.length) return "";
+  return `<h2>${esc(POD_S.cont)}</h2><div class="podCar">${c.map(o => { const d = o.dur || o.t.dur || 0, pct = d ? Math.min(100, o.pos / d * 100) : 0, cur = queue[qi] && queue[qi].id === o.id;
+    return `<div class="podCont${cur ? " cur" : ""}" data-pod="cplay" data-id="${esc(o.id)}"><button class="podX" data-pod="cdel" data-id="${esc(o.id)}" aria-label="Hatao">✕</button><img loading="lazy" src="${esc(podArtS(o.t.thumb, 200))}" onerror="this.onerror=null;this.src='/icon-192.png'" alt=""><div class="podContTx"><div class="t2">${esc(o.t.artist)}</div><div class="t1">${esc(o.t.title)}</div><div class="podBarRow"><i class="podBar"><b style="width:${pct.toFixed(1)}%"></b></i><span>${esc(d ? POD_S.left(podMin(d - o.pos)) : podMin(o.pos))}</span></div></div></div>`; }).join("")}</div>`;
+}
+function podHomeHTML(backLabel) {
+  let h = `<button class="back" data-pod="back">${ICON.chev}${esc(backLabel)}</button><h1 class="podH1">${POD_ICON}${esc(POD_S.title)}</h1>
+  <div class="podSearch">${ICON.search}<input id="podQ" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="${esc(POD_S.search)}" value="${esc(podSt.q)}">${podSt.q || podSt.gkey ? `<button class="podClr" data-pod="clear" aria-label="Clear">✕</button>` : ""}</div>`;
+  if (podSt.q || podSt.gkey) {
+    h += `<h2>${esc(podSt.q ? POD_S.results(podSt.q) : podSt.gtitle)}</h2>`;
+    if (podSt.busy) h += `<div class="spin"></div>`;
+    else if (podSt.err) h += `<div class="empty">${esc(POD_S.err)}<br><button class="podPill" data-pod="${podSt.q ? "research" : "regenre"}">${esc(POD_S.retry)}</button></div>`;
+    else if (!podSt.items || !podSt.items.length) h += `<div class="empty">${esc(POD_S.none)}</div>`;
+    else h += `<div class="podGrid">${podSt.items.map(s => podTileHTML(s)).join("")}</div>`;
+    return h;
+  }
+  h += podContHTML();
+  if (podSubs.length) h += `<h2>${esc(POD_S.yours)}</h2><div class="podCar">${podSubs.map(s => podTileHTML(s, true)).join("")}</div>`;
+  if (podHome && podHome.rows) {
+    podHome.rows.forEach(r => { h += `<h2>${esc(r.title)}${r.key && r.key !== "top" ? ` <a data-pod="genre" data-k="${esc(r.key)}" data-t="${esc(r.title)}">See All</a>` : ""}</h2><div class="podCar">${r.items.slice(0, 20).map(s => podTileHTML(s)).join("")}</div>`; });
+    if (podHome.genres && podHome.genres.length) h += `<h2>${esc(POD_S.cats)}</h2><div class="podChips">${podHome.genres.map(g => `<button class="podChip" data-pod="genre" data-k="${esc(g.key)}" data-t="${esc(g.title)}">${esc(g.title)}</button>`).join("")}</div>`;
+  } else if (podHomeErr) h += `<div class="empty">${esc(POD_S.err)}<br><button class="podPill" data-pod="rehome">${esc(POD_S.retry)}</button></div>`;
+  else h += `<h2>&nbsp;</h2><div class="podCar">${Array(4).fill('<div class="podTile"><div class="podSkel"></div></div>').join("")}</div>`;
+  return h;
+}
+function podEpHTML(show, e) {
+  const id = "pod:" + e.k, pr = podProgress(id, e.dur), cur = queue[qi] && queue[qi].id === id, playing = cur && P.playing();
+  const d = (pr && pr.dur) || e.dur || 0;
+  const lab = pr && pr.done ? POD_S.played : pr && pr.pos >= 10 && d ? POD_S.left(podMin(d - pr.pos)) : podMin(d);
+  return `<div class="podEp${cur ? " cur" : ""}${pr && pr.done ? " done" : ""}" data-pod="ep" data-k="${esc(e.k)}"><div class="podEpDate">${esc(podDate(e.date))}</div><div class="podEpT">${esc(e.title)}</div>${e.desc ? `<div class="podEpD">${esc(e.desc)}</div>` : ""}
+    <div class="podEpRow"><span class="podEpPlay">${playing ? ICON.pause : ICON.play}</span>${pr && !pr.done && pr.pos >= 10 ? `<i class="podBar"><b style="width:${pr.pct.toFixed(1)}%"></b></i>` : ""}<span class="podEpLab">${esc(lab || "")}</span></div></div>`;
+}
+function podShowHTML(id) {
+  const c = podShows.get(id) || {}, s = c.data, sub = podSubbed(id);
+  let h = `<button class="back" data-pod="back">${ICON.chev}${esc(POD_S.back)}</button>`;
+  if (!s) return h + (c.err ? `<div class="empty">${esc(POD_S.err)}<br><button class="podPill" data-pod="reshow">${esc(POD_S.retry)}</button></div>` : `<div class="spin"></div>`);
+  const inProg = s.episodes.find(e => { const p = podPos["pod:" + e.k]; return p && !p.done && p.pos >= 10; });
+  h += `<div class="podHero"><img src="${esc(s.image)}" onerror="this.onerror=null;this.src='/icon-192.png'" alt=""><div class="podHeroTx"><h3>${esc(s.title)}</h3><div class="podAuthor">${esc(s.author)}</div><div class="sub">${esc([s.genre, POD_S.eps(s.episodes.length)].filter(Boolean).join(" · "))}</div></div></div>
+  <div class="podBtns">${s.episodes.length ? `<button class="podPlayBtn" data-pod="playtop">${ICON.play}${esc(inProg ? POD_S.resume : POD_S.latest)}</button>` : ""}<button class="podSub${sub ? " on" : ""}" data-pod="sub">${esc(sub ? POD_S.following : POD_S.follow)}</button></div>`;
+  if (s.description) h += `<div class="podDesc${podSt.descOpen ? " open" : ""}" data-pod="desc">${esc(s.description).replace(/\n/g, "<br>")}<span class="podMore">${esc(podSt.descOpen ? POD_S.showLess : POD_S.showMore)}</span></div>`;
+  h += `<h2>${esc(POD_S.episodes)}</h2><div class="podEps">${s.episodes.slice(0, podSt.show).map(e => podEpHTML(s, e)).join("")}</div>`;
+  if (s.episodes.length > podSt.show) h += `<div style="text-align:center;padding:10px 0 20px"><button class="podPill" data-pod="moreeps">${esc(POD_S.more)} (${s.episodes.length - podSt.show})</button></div>`;
+  return h;
+}
+function podRender() {
+  if (!podIsView()) return;
+  const y = view.scrollTop, focused = document.activeElement && document.activeElement.id === "podQ";
+  const caret = focused ? document.activeElement.selectionStart : null;
+  const backLabel = curTab === "search" ? POD_S.backSearch : POD_S.backLib;
+  if (subView === "pods") { view.innerHTML = `<div class="podView">${podHomeHTML(backLabel)}</div>`; podLoadHome(); }
+  else { const id = subView.slice(4); view.innerHTML = `<div class="podView">${podShowHTML(id)}</div>`; podLoadShow(id); }
+  view.scrollTop = y;
+  const q = $("#podQ"); if (q) {
+    if (focused) { q.focus(); try { q.setSelectionRange(caret, caret); } catch (e) {} }
+    q.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(podSt.qt); podSearchRun(q.value); q.blur(); } };
+    q.oninput = () => { clearTimeout(podSt.qt); const v = q.value; podSt.qt = setTimeout(() => { if (v.trim().length >= 2 || !v.trim()) podSearchRun(v); }, 600); };
+  }
+}
+function podOpenShow(id) { id = String(id); podSt.show = 50; podSt.descOpen = false; go(curTab === "search" ? "search" : "library", "pod:" + id); }
+function podOpenHome() { go(curTab === "search" ? "search" : "library", "pods"); }
+
+// ----- playback -----
+function podPlayEp(show, k) {
+  if (typeof jamOn === "function" && jamOn()) return toast(POD_S.jam);
+  const eps = show.episodes || [], i = eps.findIndex(e => e.k === k); if (i < 0) return;
+  const id = "pod:" + k, cur = queue[qi];
+  if (cur && cur.id === id && mode === "audio" && audio.getAttribute("src")) { if (P.playing()) P.pause(); else P.play(); return setTimeout(() => podRefresh(subView), 60); }
+  // after this one: the newer episodes in order (serials), else the older unplayed ones (episodic)
+  let rest = eps.slice(Math.max(0, i - 20), i).reverse(); if (!rest.length) rest = eps.slice(i + 1).filter(e => { const p = podPos["pod:" + e.k]; return !(p && p.done); }).slice(0, 20);
+  const list = [eps[i], ...rest].map(e => { const t = podTrack(show, e); podRemember(show, e, t); return t; });
+  podSavePos();
+  queue = list.map(slim); qi = 0; autoplayAdded = new Set(); saveQ();
+  loadCurrent(true, podResume(id));
+  setTimeout(() => podRefresh(subView), 80);
+}
+function podPlayStored(id) { // continue-listening card
+  if (typeof jamOn === "function" && jamOn()) return toast(POD_S.jam);
+  const o = podPos[id]; if (!o || !o.t) return;
+  const cur = queue[qi]; if (cur && cur.id === id && audio.getAttribute("src")) { if (!P.playing()) P.play(); return; }
+  queue = [slim(o.t)]; qi = 0; autoplayAdded = new Set(); saveQ(); loadCurrent(true, podResume(id));
+  setTimeout(() => podRefresh(subView), 80);
+}
+function podSkip(sec) { const d = P.dur(), t = P.time() || 0; P.seek(Math.max(0, Math.min(d ? d - 1 : t + sec, t + sec))); podRecord(true); }
+function podSetRate(r) { podRate = r; store.set("podRate", r); podApplyRate(); podUi(true); toast(POD_S.speed(r)); }
+function podApplyRate() {
+  const a = audio; if (!a) return; const pod = isPod(queue[qi]);
+  const want = pod ? podRate : (window.__pod && typeof window.__pod.songRate === "function" ? (+window.__pod.songRate() || 1) : 1);
+  if (!pod && !podUi.wasPod) return; // songs: leave the rate to the song speed setting
+  try { if (a.playbackRate !== want) a.playbackRate = want; if (a.defaultPlaybackRate !== want) a.defaultPlaybackRate = want; a.preservesPitch = true; a.webkitPreservesPitch = true; a.mozPreservesPitch = true; } catch (e) {}
+}
+function podUi(force) { // now-playing / mini player controls for podcasts vs songs
+  const pod = isPod(queue[qi]);
+  if (pod !== podUi.on || force) {
+    const was = podUi.on; podUi.on = pod; document.body.classList.toggle("podOn", pod);
+    if (!pod && was) { podUi.wasPod = true; podApplyRate(); podUi.wasPod = false; } else if (pod) podApplyRate();
+    if ("mediaSession" in navigator) { const ms = navigator.mediaSession, h = (a, f) => { try { ms.setActionHandler(a, f); } catch (e) {} };
+      if (pod) { h("seekbackward", () => { if (isPod(queue[qi])) podSkip(-15); }); h("seekforward", () => { if (isPod(queue[qi])) podSkip(30); }); } else if (was) { h("seekbackward", null); h("seekforward", null); } }
+  }
+  const rb = $("#podRate"); if (rb) { const txt = (podRate % 1 ? String(podRate) : podRate + "") + "×"; if (rb.textContent !== txt) rb.textContent = txt; rb.classList.toggle("on", podRate !== 1); }
+  if (pod) { const b = $("#npQ"); if (b && b.textContent !== "🎙️ Podcast") { b.textContent = "🎙️ Podcast"; b.className = "qpill podQ"; } }
+}
+podUi.on = false; podUi.wasPod = false;
+(function podControls() { // extra buttons; shown only while a podcast plays (CSS: body.podOn)
+  const pp = $("#npPrev"), pn = $("#npNext"), mn = $("#miniNext"), bot = document.querySelector(".npBottom");
+  const mk = (id, cls, html, label, fn) => { const b = document.createElement("button"); b.id = id; b.className = cls; b.innerHTML = html; b.setAttribute("aria-label", label); b.onclick = e => { e.stopPropagation(); fn(); }; return b; };
+  if (pp) pp.after(mk("podB15", "icon big podCtl", POD_B15, "15 sec peeche", () => podSkip(-15)));
+  if (pn) pn.before(mk("podF30", "icon big podCtl", POD_F30, "30 sec aage", () => podSkip(30)));
+  if (mn) mn.after(mk("podMiniF", "icon podCtl", POD_F30, "30 sec aage", () => podSkip(30)));
+  if (bot) bot.prepend(mk("podRate", "icon small podCtl podRateBtn", "1×", "Speed", () => podSetRate(POD_RATES[(POD_RATES.indexOf(podRate) + 1) % POD_RATES.length])));
+  const ar = $("#npArtist"); if (ar) ar.addEventListener("click", e => { const t = queue[qi]; if (!isPod(t)) return; const o = podPos[t.id]; if (o && o.s) { e.stopPropagation(); closeNP(); podOpenShow(o.s); } });
+})();
+setInterval(() => { podUi(); if (isPod(queue[qi])) { podApplyRate(); if (!audio.paused) { podRecord(); if (podIsView() && subView.startsWith("pod:") && Date.now() - (podSt.rt || 0) > 15000) { podSt.rt = Date.now(); podRender(); } } } }, 1000);
+["pause", "seeked", "ended"].forEach(ev => document.addEventListener(ev, e => { if (e.target === audio && isPod(queue[qi])) { podRecord(true); if (ev !== "seeked" && podIsView()) setTimeout(podRender, 50); } }, true));
+document.addEventListener("loadedmetadata", e => { if (e.target === audio && isPod(queue[qi])) podApplyRate(); }, true);
+document.addEventListener("play", e => { if (e.target === audio && isPod(queue[qi])) { podApplyRate(); if (podIsView()) setTimeout(podRender, 50); } }, true);
+
+// ----- integration with the player (wrapping; no existing lines edited) -----
+const rawUrlOfPod = urlOf; urlOf = function (t) { if (isPod(t)) return podSrc(t.url); return rawUrlOfPod.apply(this, arguments); };
+const rawSongKeyPod = songKey; songKey = function (t) { if (isPod(t)) return "pod:" + t.id; return rawSongKeyPod.apply(this, arguments); }; // every episode is its own "song"
+const rawLoadCurrentPod = loadCurrent; loadCurrent = function (autoplay, startAt) { const t = queue[qi]; if (isPod(t) && !startAt) startAt = podResume(t.id); const r = rawLoadCurrentPod.call(this, autoplay, startAt); podUi(); podApplyRate(); return r; };
+const rawOnFailPod = onFail; onFail = function (t, url, my, startAt, autoplay, attempt) {
+  if (!isPod(t)) return rawOnFailPod.apply(this, arguments);
+  clearTimeout(stallTimer); if (my !== loadToken) return;
+  if (!/\/api\/pod\/a\?/.test(url || "") && t.url) { status(POD_S.loading); return playUrl(t, podProxy(t.url), my, autoplay, startAt, 1); } // try the pass-through once
+  userPaused = true; syncPlay(); status(POD_S.fail);
+};
+const rawYtFallbackPod = ytFallback; ytFallback = function (t) { if (isPod(t)) { userPaused = true; syncPlay(); status(POD_S.fail); return; } return rawYtFallbackPod.apply(this, arguments); };
+const rawAutoEndPod = autoEnd; autoEnd = function () { if (isPod(queue[qi])) { userPaused = true; syncPlay(); return; } return rawAutoEndPod.apply(this, arguments); }; // no "similar songs" after an episode
+const rawFillPod = maybeAutoplayFill; maybeAutoplayFill = function () { if (isPod(queue[qi])) return; return rawFillPod.apply(this, arguments); };
+const rawNextPod = next; next = function (auto) { const t = queue[qi]; if (auto && isPod(t)) podMarkDone(t.id); return rawNextPod.apply(this, arguments); };
+const rawMixNextPod = mixNextIndex; mixNextIndex = function () { if (isPod(queue[qi])) return -1; const j = rawMixNextPod.apply(this, arguments); return j >= 0 && isPod(queue[j]) ? -1 : j; }; // AutoMix never blends podcasts
+const rawMixMaybePod = mixMaybe; mixMaybe = function () { if (isPod(queue[qi])) return; return rawMixMaybePod.apply(this, arguments); };
+const rawAddRecentPod = addRecent; addRecent = function (t) { if (isPod(t)) return; return rawAddRecentPod.apply(this, arguments); };
+const rawHistPlayPod = histPlay; histPlay = function (t) { if (isPod(t)) return; return rawHistPlayPod.apply(this, arguments); }; // podcasts are not song plays / Recap
+const rawHistTodayPod = histToday; histToday = function () { if (isPod(queue[qi])) return { t: 0, p: 0, s: {} }; return rawHistTodayPod.apply(this, arguments); }; // listening minutes count songs only
+const rawStartRadioPod = startRadio; startRadio = function (t) { if (isPod(t)) return; return rawStartRadioPod.apply(this, arguments); };
+const rawToggleLikePod = toggleLike; toggleLike = function (t) { if (isPod(t)) return toast(POD_S.noLike); return rawToggleLikePod.apply(this, arguments); };
+const rawDownloadPod = download; download = function (t) { if (isPod(t)) return toast(POD_S.noDl); return rawDownloadPod.apply(this, arguments); };
+const rawDownloadAllPod = downloadAll; downloadAll = function (list) { return rawDownloadAllPod.call(this, (list || []).filter(t => !isPod(t))); };
+if (typeof offDownload === "function") { const rawOffDl = offDownload; offDownload = function (t) { if (isPod(t)) return toast(POD_S.noDl); return rawOffDl.apply(this, arguments); }; } // Android phone downloads
+if (typeof openAddToPlaylist === "function") { const rawAddPl = openAddToPlaylist; openAddToPlaylist = function (t) { if (isPod(t)) return; return rawAddPl.apply(this, arguments); }; }
+const rawSyncQPod = syncQ; syncQ = function () { if (isPod(queue[qi])) return podUi(true); return rawSyncQPod.apply(this, arguments); };
+const rawRenderQueuePod = renderQueue; renderQueue = function () { rawRenderQueuePod.apply(this, arguments); if (!isPod(queue[qi])) return; const n = $("#autoplayNote"); if (n) n.textContent = ""; const ql = $("#queueList"); if (ql && !queue[qi + 1]) ql.innerHTML = `<div class="empty" style="padding:16px">${esc(POD_S.upNext)}</div>`; };
+const rawOpenTrackSheetPod = openTrackSheet; openTrackSheet = function (t) {
+  if (!isPod(t)) return rawOpenTrackSheetPod.apply(this, arguments);
+  const o = podPos[t.id] || {};
+  showSheet(`<div class="sgroup"><div class="shead"><img src="${esc(podArtS(t.thumb, 200))}"><div><div class="t1">${esc(t.title)}</div><div class="sub">${esc(t.artist)}</div></div></div>
+    ${o.s ? `<button data-s="show">${esc(POD_S.openShow)}</button>` : ""}<button data-s="done">${esc(o.done ? POD_S.markUnplayed : POD_S.markPlayed)}</button>
+    <button data-s="rate">${esc(POD_S.speed(podRate))}</button></div>`, {
+    show: () => { closeNP(); podOpenShow(o.s); }, done: () => { podMarkDone(t.id, !o.done); if (podIsView()) podRender(); },
+    rate: () => { podSetRate(POD_RATES[(POD_RATES.indexOf(podRate) + 1) % POD_RATES.length]); return true; },
+  });
+};
+if (typeof lyrLoad === "function" && typeof lyrCache !== "undefined") { // tap on the artwork: episode notes instead of lyrics
+  const rawLyrLoadPod = lyrLoad; lyrLoad = function (t) {
+    if (!isPod(t)) return rawLyrLoadPod.apply(this, arguments);
+    const o = podPos[t.id] || {}; lyrCache.set(t.id, { plain: POD_S.notesHead + "\n\n" + (o.n || POD_S.noNotes) }); return rawLyrLoadPod.apply(this, arguments);
+  };
+}
+const podRoute = () => { if (!podIsView()) return false; podRender(); return true; };
+const rawRenderLibraryPod = renderLibrary; renderLibrary = function () {
+  if (podRoute()) return;
+  rawRenderLibraryPod.apply(this, arguments);
+  if (subView) return; const ll = view.querySelector(".libLinks"); if (!ll || ll.querySelector(".podLib")) return;
+  const tmp = document.createElement("div"); tmp.innerHTML = `<button data-pod="home" class="podLib"><i class="podLibI">🎙️</i><span>${esc(POD_S.lib)} <small class="sub">${esc(POD_S.libSub(podSubs.length))}</small></span></button>`;
+  const after = ll.querySelector("[data-open=recent]"); if (after) after.after(tmp.firstChild); else ll.appendChild(tmp.firstChild);
+};
+const rawRenderSearchPod = renderSearch; renderSearch = function () {
+  if (podRoute()) return;
+  rawRenderSearchPod.apply(this, arguments);
+  const s = searchState; if (subView || s.q || s.typing) return; const sb = $("#sbody"); if (!sb || sb.querySelector(".podEntry")) return;
+  const card = `<button class="podEntry" data-pod="home"><i class="podEntryI">${POD_ICON}</i><span><b>🎙️ ${esc(POD_S.title)}</b><small>${esc(POD_S.sub)}</small></span><i class="podEntryC">›</i></button>`;
+  const h2 = [...sb.querySelectorAll("h2")].find(x => /Browse/i.test(x.textContent)) || sb.querySelector(".chips");
+  if (h2) h2.insertAdjacentHTML("beforebegin", card); else sb.insertAdjacentHTML("afterbegin", card);
+};
+view.addEventListener("click", e => {
+  const b = e.target.closest("[data-pod]"); if (!b || !view.contains(b)) return;
+  e.stopPropagation(); e.preventDefault();
+  const a = b.dataset.pod, sid = typeof subView === "string" && subView.startsWith("pod:") ? subView.slice(4) : "";
+  const show = sid && podShows.get(sid) && podShows.get(sid).data;
+  if (a === "home") { podSt.q = ""; podSt.gkey = ""; return podOpenHome(); }
+  if (a === "back") { if (sid) { subView = "pods"; rerender(); } else if (podSt.q || podSt.gkey) { podSt.q = ""; podSt.gkey = ""; podSt.items = null; podRender(); } else { subView = null; rerender(); } return; }
+  if (a === "clear") { podSt.q = ""; podSt.gkey = ""; podSt.items = null; return podRender(); }
+  if (a === "show") return podOpenShow(b.dataset.id);
+  if (a === "genre") return podGenre(b.dataset.k, b.dataset.t);
+  if (a === "research") return podSearchRun(podSt.q);
+  if (a === "regenre") return podGenre(podSt.gkey, podSt.gtitle);
+  if (a === "rehome") { podLoadHome(true); return podRender(); }
+  if (a === "reshow" && sid) { podLoadShow(sid, true); return podRender(); }
+  if (a === "cdel") { const o = podPos[b.dataset.id]; if (o) { o.pos = 0; podSavePos(); } return podRender(); }
+  if (a === "cplay") return podPlayStored(b.dataset.id);
+  if (a === "desc") { podSt.descOpen = !podSt.descOpen; return podRender(); }
+  if (a === "moreeps") { podSt.show += 100; return podRender(); }
+  if (a === "sub" && show) {
+    if (podSubbed(sid)) { podSubs = podSubs.filter(x => x.id !== sid); toast(POD_S.unfollowed); }
+    else { podSubs.unshift({ id: sid, title: show.title, author: show.author, image: show.image }); toast(POD_S.followed); }
+    store.set("podSubs", podSubs); return podRender();
+  }
+  if (a === "playtop" && show) { const e0 = show.episodes.find(e => { const p = podPos["pod:" + e.k]; return p && !p.done && p.pos >= 10; }) || show.episodes[0]; return e0 && podPlayEp(show, e0.k); }
+  if (a === "ep" && show) return podPlayEp(show, b.dataset.k);
+}, true);
+// Android back button: call window.__pod.back() first (returns true when it handled the tap)
+window.__pod = {
+  get rate() { return podRate; }, set rate(r) { if (POD_RATES.includes(+r)) podSetRate(+r); }, rates: POD_RATES, songRate: null,
+  isPod, subs: () => podSubs, pos: () => podPos, shows: podShows, open: podOpenHome, openShow: podOpenShow, search: podSearchRun, skip: podSkip,
+  playEp: (showId, k) => { const c = podShows.get(String(showId)); if (c && c.data) podPlayEp(c.data, k); }, playStored: podPlayStored, record: podRecord,
+  back() { if (!podIsView()) return false; if (subView.startsWith("pod:")) subView = "pods"; else if (podSt.q || podSt.gkey) { podSt.q = ""; podSt.gkey = ""; podSt.items = null; } else subView = null; rerender(); return true; },
+};
+if (queue[qi]) podUi(true);
+
+try { if (window.__pod) window.__pod.songRate = () => pbRate; } catch (e) {}
+
 })();

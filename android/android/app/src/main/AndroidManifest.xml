@@ -24,6 +24,24 @@
 
         </activity>
 
+        <!-- Home-screen widget "Dhun" -->
+        <receiver
+            android:name=".DhunWidgetProvider"
+            android:exported="true"
+            android:label="@string/dhun_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/dhun_widget_info" />
+        </receiver>
+
+        <!-- Widget prev / play-pause / next taps (only our own PendingIntents reach it) -->
+        <receiver
+            android:name=".DhunWidgetActionReceiver"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -43,4 +61,11 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <!-- Android 11+ package visibility: let DhunSpeech find the system voice-input dialog -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
 </manifest>
