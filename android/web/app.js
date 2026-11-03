@@ -4696,4 +4696,69 @@ function onbSync() {
 }
 /* ===== end v30 onboarding ===== */
 
+/* ===== v31: Recent searches only when the search box is tapped (Apple Music / Spotify style) ===== */
+// Normal Search page: no recent list. Focus the box → recents view right under it (× per row, Clear all) covering
+// Podcasts/Browse, plus an iOS-style "Cancel". Typing → suggestions as before. Blur with empty box / Cancel → normal page.
+let rsMode = false, rsHold = 0, rsSubmit = false;
+const rsClock = `<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg>`;
+v25HistShow = function () { v25HistHide(); }; // the v25 drop-down is replaced by this view
+function rsApply() {
+  const q = $("#q"), bar = view.querySelector(".searchBar");
+  if (!q || !bar || curTab !== "search") { rsMode = false; view.classList.remove("rsOn", "rsWait"); return; }
+  const sb = $("#sbody");
+  if (sb) { // the old always-on "Recent Searches" block never shows on the page itself
+    const h2 = [...sb.querySelectorAll("h2")].find(h => h.querySelector("[data-act=clearSearches]"));
+    if (h2) { const n = h2.nextElementSibling; if (n && n.classList.contains("sugg")) n.remove(); h2.remove(); }
+  }
+  let cx = bar.querySelector(".rsCancel"), pv = view.querySelector("#rsv");
+  if (!rsMode) { if (cx) cx.remove(); if (pv) pv.remove(); view.classList.remove("rsOn", "rsWait"); return; }
+  if (!cx) { bar.insertAdjacentHTML("beforeend", `<button class="rsCancel" data-rsv="cancel">${esc(tr("Cancel"))}</button>`); }
+  const s = searchState, val = q.value.trim();
+  const foc = document.activeElement === q || Date.now() < rsHold;
+  const show = foc && searches.length > 0 && (!val || (val === s.q && !s.typing));
+  if (show) {
+    const h = `<div class="rsvH"><b>${esc(tr("Recent Searches"))}</b><button data-rsv="clear">${esc(tr("Clear all"))}</button></div>` +
+      searches.slice(0, 10).map((x, i) => `<div class="rsvRow"><button class="rsvGo" data-rsv="go" data-i="${i}">${rsClock}<span>${esc(x)}</span></button><button class="rsvX" data-rsv="rm" data-i="${i}" aria-label="Remove">✕</button></div>`).join("");
+    if (!pv) { pv = document.createElement("div"); pv.id = "rsv"; bar.insertAdjacentElement("afterend", pv); }
+    pv.innerHTML = h;
+    view.classList.add("rsOn"); view.classList.remove("rsWait");
+  } else {
+    if (pv) pv.remove(); view.classList.remove("rsOn");
+    view.classList.toggle("rsWait", !!val && val !== s.q && !(s.typing && suggestions.length)); // typing, suggestions not back yet
+  }
+}
+function rsExit(clear) {
+  rsMode = false; const q = $("#q");
+  if (clear) { const s = searchState; clearTimeout(suggT); suggestions = []; s.typing = false; s.typed = ""; s.q = ""; s.loading = false; s.token = Math.random(); if (q) q.blur(); renderSearch(); }
+  else { if (q) q.blur(); rsApply(); }
+}
+const rsPrevRender = renderSearch;
+renderSearch = function () { const r = rsPrevRender.apply(this, arguments); try { rsApply(); } catch (e) { console.warn("rs", e); } return r; };
+view.addEventListener("focusin", e => { if (e.target && e.target.id === "q" && !rsSubmit) { rsMode = true; rsApply(); } });
+view.addEventListener("keydown", e => { if (e.key === "Enter" && e.target && e.target.id === "q") { rsSubmit = true; rsMode = false; setTimeout(() => { rsSubmit = false; rsMode = false; const q = $("#q"); if (q && document.activeElement === q) q.blur(); rsApply(); }, 0); } }, true); // search submitted: keyboard down, results stay
+view.addEventListener("input", e => { if (e.target && e.target.id === "q") rsApply(); });
+view.addEventListener("focusout", e => {
+  if (!e.target || e.target.id !== "q") return;
+  setTimeout(() => {
+    const q = $("#q"); if (!rsMode || !q || document.activeElement === q || Date.now() < rsHold) return;
+    const val = q.value.trim();
+    if (!val || val === searchState.q) { rsMode = false; rsApply(); } // typed text stays with its suggestions + Cancel
+  }, 300);
+});
+view.addEventListener("pointerdown", e => { if (e.target.closest("#rsv")) { rsHold = Date.now() + 700; if (e.target.closest("button")) e.preventDefault(); } }, true); // keep focus/keyboard while tapping a row
+view.addEventListener("touchstart", e => { if (e.target.closest && e.target.closest("#rsv")) rsHold = Date.now() + 700; }, { capture: true, passive: true });
+view.addEventListener("click", e => {
+  const b = e.target.closest("[data-rsv]"); if (!b) return; e.preventDefault(); e.stopPropagation();
+  const k = b.dataset.rsv, i = +b.dataset.i;
+  if (k === "cancel") return rsExit(true);
+  if (k === "go") { const x = searches[i]; rsMode = false; const q = $("#q"); if (q) { q.value = x || ""; q.blur(); } if (x) doSearch(x); else rsApply(); return; }
+  if (k === "rm") { searches.splice(i, 1); store.set("searches", searches); const q = $("#q"); if (q && document.activeElement !== q) try { q.focus({ preventScroll: true }); } catch (e2) {} return rsApply(); }
+  if (k === "clear") { searches = []; store.set("searches", searches); const q = $("#q"); if (q && document.activeElement !== q) try { q.focus({ preventScroll: true }); } catch (e2) {} return rsApply(); }
+}, true);
+new MutationObserver(() => { if (!$("#q") && (rsMode || view.classList.contains("rsOn") || view.classList.contains("rsWait"))) { rsMode = false; view.classList.remove("rsOn", "rsWait"); } }).observe(view, { childList: true });
+if (window.__pod) { const rsPodBack = window.__pod.back; window.__pod.back = function () { if (rsMode && $("#q")) { rsExit(true); return true; } return rsPodBack.apply(this, arguments); }; } // Android back: leave the recents view first
+window.__rs = { get on() { return rsMode; }, apply: rsApply, exit: rsExit };
+try { if (curTab === "search") rsApply(); } catch (e) {}
+/* ===== end v31 recent searches ===== */
+
 })();

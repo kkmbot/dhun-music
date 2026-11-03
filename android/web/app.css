@@ -1029,3 +1029,18 @@ h2.onbRowH>a{flex:0 0 auto}
 @media (prefers-reduced-motion:reduce){.onbA .onbLb,.onbA .onbAb{animation:none}}
 .lite .onbA .onbLb,.lite .onbA .onbAb{animation:none}
 @media (max-width:370px){.onbA .onbLb{--s:96px}.onbA .onbLb.z1{--s:86px}.onbA .onbLb.z2{--s:104px}.onbA .onbLb.z3{--s:90px}.onbA .onbAb{width:108px}.onbA .onbAb.z5,.onbA .onbAb.z1{--s:96px}.onbA .onbHead h1{font-size:25px}}
+/* ===== v31: recent searches view (shown only while the search box is focused) ===== */
+#view.rsOn #sbody,#view.rsWait #sbody{display:none}
+.searchBar .rsCancel{flex:none;background:none;border:0;color:var(--accent,#fa2d48);font-size:17px;font-weight:400;padding:8px 2px 8px 0;font-family:inherit;white-space:nowrap;animation:rsIn .18s ease-out}
+@keyframes rsIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}
+#rsv{padding:2px 16px 40px;min-height:calc(100vh - 200px);animation:rsFade .15s ease-out}
+@keyframes rsFade{from{opacity:0}to{opacity:1}}
+#rsv .rsvH{display:flex;align-items:center;justify-content:space-between;padding:12px 0 4px}
+#rsv .rsvH b{font-size:20px;font-weight:700;color:#fff}
+#rsv .rsvH button{background:none;border:0;color:var(--accent,#fa2d48);font-size:16px;font-weight:400;padding:10px 0 10px 16px;font-family:inherit}
+#rsv .rsvRow{display:flex;align-items:center;border-bottom:.5px solid rgba(255,255,255,.12);min-height:52px}
+#rsv .rsvGo{flex:1;min-width:0;display:flex;align-items:center;gap:12px;background:none;border:0;color:#fff;font-size:17px;font-weight:400;text-align:left;padding:14px 0;font-family:inherit}
+#rsv .rsvGo svg{width:18px;height:18px;fill:rgba(255,255,255,.45);flex:none}
+#rsv .rsvGo span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#rsv .rsvX{flex:none;width:44px;height:44px;margin-right:-10px;background:none;border:0;color:rgba(255,255,255,.45);font-size:15px;padding:0;font-family:inherit}
+/* ===== end v31 ===== */
