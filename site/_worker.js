@@ -1410,24 +1410,34 @@ async function podCached(key, sec, fn) {
   if (v && !v.error) { memSet("pod:" + key, v, Math.min(sec, 600)); try { await caches.default.put(ck, new Response(JSON.stringify(v), { headers: { "content-type": "application/json", "cache-control": "public, max-age=" + sec } })); } catch (e) {} }
   return v;
 }
+// v1.0.8: Apple sometimes refuses the worker's egress — 1 retry with a different user-agent (the app also falls back to Apple from the phone)
+const POD_AUA = ["Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1", "Podcasts/3.9 (Dhun; +https://dhun.sites.tab.bot)"];
+async function podApple(u, ms = 8000) {
+  let r = null, err = null;
+  for (let k = 0; k < 2; k++) {
+    try { r = await tfetch(u, { headers: { "user-agent": POD_AUA[k], accept: "application/json, text/javascript, */*" } }, ms); if (r.ok) return r; } catch (e) { err = e; }
+    if (!k) await new Promise(z => setTimeout(z, 350));
+  }
+  if (r) return r; throw err || new Error("apple failed");
+}
 const podArt = (u, s = 600) => String(u || "").replace(/\/\d+x\d+(bb)?\.(jpg|jpeg|png|webp)$/i, `/${s}x${s}bb.jpg`);
 const podShowOf = r => ({ id: String(r.collectionId || r.id || ""), title: r.collectionName || r.name || "", author: r.artistName || "", image: podArt(r.artworkUrl600 || r.artworkUrl100 || ""), feed: r.feedUrl || "", genre: r.primaryGenreName || (r.genres && r.genres[0] && (r.genres[0].name || r.genres[0])) || "" });
 async function podSearch(q, limit = 30) {
   if (!q) return { items: [] };
-  const r = await tfetch(`https://itunes.apple.com/search?media=podcast&entity=podcast&country=IN&limit=${limit}&term=${encodeURIComponent(q)}`, {}, 8000);
+  const r = await podApple(`https://itunes.apple.com/search?media=podcast&entity=podcast&country=IN&limit=${limit}&term=${encodeURIComponent(q)}`);
   if (!r.ok) throw new Error("search " + r.status);
   const d = await r.json();
   return { items: (d.results || []).filter(x => x.collectionId && x.feedUrl).map(podShowOf) };
 }
 async function podChartRss(gid) {
-  const r = await tfetch(`https://itunes.apple.com/in/rss/toppodcasts/limit=50${gid ? "/genre=" + gid : ""}/json`, {}, 8000);
+  const r = await podApple(`https://itunes.apple.com/in/rss/toppodcasts/limit=50${gid ? "/genre=" + gid : ""}/json`);
   const d = await r.json(); const es = (d.feed && d.feed.entry) || [];
   return (Array.isArray(es) ? es : [es]).map(e => ({ id: String(e.id && e.id.attributes && e.id.attributes["im:id"] || ""), title: (e["im:name"] || {}).label || "", author: (e["im:artist"] || {}).label || "", image: podArt(((e["im:image"] || []).slice(-1)[0] || {}).label || ""), feed: "", genre: (e.category && e.category.attributes && e.category.attributes.label) || "" })).filter(x => x.id);
 }
 async function podChart(genre) {
   if (genre && POD_GENRES[genre]) { try { return await podChartRss(POD_GENRES[genre][0]); } catch (e) { return await podChartRss(POD_GENRES[genre][0]); } }
   try {
-    const r = await tfetch("https://rss.marketingtools.apple.com/api/v2/in/podcasts/top/50/podcasts.json", {}, 8000);
+    const r = await podApple("https://rss.marketingtools.apple.com/api/v2/in/podcasts/top/50/podcasts.json");
     const d = await r.json(); const out = ((d.feed && d.feed.results) || []).map(podShowOf).filter(x => x.id);
     if (out.length) return out;
   } catch (e) {}
@@ -1500,7 +1510,7 @@ async function podShow(id, feed) {
   if (id && !/^\d{1,15}$/.test(id)) return { error: "bad id" };
   return podCached("show:" + (id || podH36(feed || "")), 3600, async () => {
     let meta = { id: id || "", title: "", author: "", image: "", feed: feed || "", genre: "" };
-    if (id) { try { const r = await tfetch(`https://itunes.apple.com/lookup?id=${id}&entity=podcast&country=IN`, {}, 8000); const d = await r.json(); const x = (d.results || []).find(z => z.collectionId) || null; if (x) meta = { ...podShowOf(x), feed: feed || x.feedUrl || "" }; } catch (e) {} }
+    if (id) { try { const r = await podApple(`https://itunes.apple.com/lookup?id=${id}&entity=podcast&country=IN`); const d = await r.json(); const x = (d.results || []).find(z => z.collectionId) || null; if (x) meta = { ...podShowOf(x), feed: feed || x.feedUrl || "" }; } catch (e) {} }
     if (!meta.feed) return { error: "no feed" };
     if (!podHostOk(meta.feed)) return { error: "feed host not allowed" };
     const r = await podFetchSafe(meta.feed, { headers: POD_UA }, 12000);

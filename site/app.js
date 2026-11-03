@@ -4789,4 +4789,402 @@ if (V32N) {
 window.__v32 = { taste: { local: tasteLocal, sync: tasteSync, push: tastePush, apply: tasteApply, at: tasteLocalAt }, fix: v32Fix, nw: () => nwData, nwLoad, ti: () => tiData, tiLoad, dec: DEC_TILES };
 window.__v32t = { collOpen: k => collOpen(k), openNP: () => openNP(), closeNP: () => closeNP(), addPl: t => openAddToPlaylist(t), q: () => queue, qi: () => qi, pls: () => playlists, newPl: (id, name) => { playlists.unshift({ id, name, tracks: [] }); store.set("playlists", playlists); }, slim: t => slim(t), setLang: l => setLang(l), go: (t, s) => go(t, s) };
 /* ===== end v32 ===== */
+/* ===== v1.0.8 #4 Lyrics share: selection W (in place, live preview + Share/Save) + card Q (polaroid on cover-colour gradient) — from work/dhun-lyr ===== */
+
+// ===== Lyrics share — CORE v2: IN-PLACE selection on the lyrics view (no separate picker screen) =====
+// Her feedback (2026-11-03): "Bich wala kisi ka accha ni lag raha" -> the separate line-picker screen is gone. Long-press a lyric line
+// (or tap the small "Share lyrics" pill) and the SAME lyrics view enters select mode: tapped lines get selected right there, a small
+// floating Share control appears at the bottom of the lyrics. The look of the lyrics view does not change.
+// HOW TO APPLY: paste this block, then ONE variant-P/Q/R.js block, into app.js just BEFORE the final `})();` (after every other block:
+// uses scLoadImg/scWrap/scRound/scSave/scName, the sc2* helpers of the v28 Share Card A block, lyrCache/lyrFor/lyrOpenNow/lyrRender,
+// lyrUserScroll, lyrLongPressed, shareCard, showSheet, toast, tr, v25L, esc, ICON, P, queue/qi, np). CSS: lyr-core2.css then variant-X.css.
+// The variant defines lyrCardDraw(t, lines) -> 1080×1920 canvas and sets window.LS_IN = "P" | "Q" | "R" (and LS_MINI for a live thumbnail).
+const LS_MAX = 4;
+let lsIn = null;            // select mode: { t, sel:Set(position among #lyrPanel p.lline), ui, plain }
+let lsTouchEl = null;       // the lyric line under the last touch (so a long-press selects exactly that line, even in a repeated chorus)
+function lsLines(t) {
+  const c = (t && lyrCache.get(t.id)) || {};
+  if (c.synced) return c.synced.map(l => String(l.x || "").trim()).filter(Boolean);
+  if (c.plain) return String(c.plain).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  return [];
+}
+function lsCanShare() { const t = queue[qi]; return !!(t && lyrOpenNow && lyrFor === t.id && lsLines(t).length); }
+function lsEls() { return [...document.querySelectorAll("#lyrPanel p.lline")]; }
+function lsAw() { return $("#npArtWrap"); }
+function lsPillSync() {
+  const aw = lsAw(); if (!aw) return;
+  let b = $("#lsPill");
+  if (!b) { b = document.createElement("button"); b.id = "lsPill"; b.type = "button"; b.setAttribute("data-notr", ""); aw.appendChild(b);
+    b.addEventListener("click", e => { e.stopPropagation(); e.preventDefault(); const t = queue[qi]; if (t) lsEnter(t, null); }, true);
+    ["pointerdown", "touchstart"].forEach(ev => b.addEventListener(ev, e => e.stopPropagation(), { passive: true })); }
+  b.innerHTML = `${ICON.share}<span>${esc(v25L("Share lyrics", "Lyrics share", "बोल शेयर करो"))}</span>`;
+  b.classList.toggle("on", lsCanShare() && !lsIn);
+  // leave select mode when the song changes, the lyrics close or the player closes
+  if (lsIn && (queue[qi] !== lsIn.t || !lyrOpenNow || !np.classList.contains("open") || !lsIn.plain && !lsEls().length)) lsExit(true);
+}
+// plain (unsynced) lyrics are one text block: in select mode they are shown as one <p class="lline"> per line, same font and size
+function lsPlainToLines() {
+  const p = $("#lyrPanel"), b = p && p.querySelector(".lyrBody.plain"); if (!b) return false;
+  const L = lsLines(queue[qi]); if (!L.length) return false;
+  b.innerHTML = L.map(x => `<p class="lline lsPl"><span>${esc(x)}</span></p>`).join("") + `<div style="height:45%"></div>`; return true;
+}
+function lsEnter(t, el) {
+  if (!t || !lyrOpenNow || !lsLines(t).length) { toast(v25L("No lyrics to share", "Share karne ko lyrics nahi", "शेयर करने को बोल नहीं")); return; }
+  if (lsIn) lsExit(true);
+  const plain = !lsEls().length && lsPlainToLines();
+  const els = lsEls(); if (!els.length) return;
+  let i = el ? els.indexOf(el) : -1;
+  if (i < 0) i = els.findIndex(e => e.classList.contains("cur"));
+  if (i < 0) { const pr = $("#lyrPanel").getBoundingClientRect(); i = Math.max(0, els.findIndex(e => e.getBoundingClientRect().top > pr.top + pr.height * 0.2)); }
+  lyrUserScroll = Date.now() + 864e5; // freeze the karaoke auto-scroll while selecting
+  const aw = lsAw(), ui = document.createElement("div"); ui.id = "lsUi"; ui.setAttribute("data-notr", "");
+  ui.innerHTML = `<div class="lsiTop"><button type="button" class="lsiX" data-lsi="x">${esc(v25L("Cancel", "Cancel", "रद्द"))}</button><div class="lsiCnt"></div></div>
+    <div class="lsiBar"><div class="lsiMini"><canvas width="90" height="160"></canvas></div><div class="lsiTxt"><b></b><small>${esc(v25L("Card preview", "Card preview", "कार्ड"))}</small></div>
+    <button type="button" class="lsiNo" data-lsi="x">${esc(v25L("Cancel", "Cancel", "रद्द"))}</button><button type="button" class="lsiGo" data-lsi="go">${ICON.share}<span></span></button></div>`;
+  ["pointerdown", "touchstart", "touchmove", "touchend"].forEach(ev => ui.addEventListener(ev, e => e.stopPropagation(), { passive: true }));
+  aw.appendChild(ui);
+  lsIn = { t, sel: new Set([i]), ui, plain };
+  np.classList.add("lsIn", "lsIn" + (window.LS_IN || "P"));
+  if (navigator.vibrate) try { navigator.vibrate(10); } catch (e) {}
+  lsInPaint(); lsPillSync();
+  requestAnimationFrame(() => ui.classList.add("show"));
+  try { history.pushState({ lsIn: 1 }, ""); lsIn.hist = 1; } catch (e) {}
+}
+function lsExit(silent) {
+  const S = lsIn; if (!S) return; lsIn = null;
+  np.classList.remove(...[...np.classList].filter(c => /^lsIn/.test(c))); // lsIn + any style class (P..W)
+  document.querySelectorAll("#lyrPanel p[data-lsel]").forEach(p => { p.removeAttribute("data-lsel"); p.removeAttribute("data-lse"); });
+  S.ui.classList.remove("show"); setTimeout(() => S.ui.remove(), 220);
+  if (S.plain) lyrRender();
+  lyrUserScroll = Date.now() - 2500; // karaoke scroll comes back about a second later
+  if (S.hist && !silent) { try { if (history.state && history.state.lsIn) history.back(); } catch (e) {} }
+  lsPillSync();
+}
+window.addEventListener("popstate", () => { if (lsIn) { lsIn.hist = 0; lsExit(); } });
+function lsInTap(i) {
+  const S = lsIn; if (!S || i < 0) return; const sel = [...S.sel].sort((a, b) => a - b), lo = sel[0], hi = sel[sel.length - 1];
+  if (S.sel.has(i)) { if (sel.length === 1) return; if (i === lo || i === hi) S.sel.delete(i); else S.sel = new Set([i]); }
+  else if (i === lo - 1 || i === hi + 1) { if (sel.length >= LS_MAX) { toast(v25L("Max 4 lines", "Max 4 lines 🙂", "अधिकतम 4 लाइन")); return; } S.sel.add(i); }
+  else S.sel = new Set([i]);
+  lsInPaint();
+}
+function lsInLines() { const S = lsIn, els = lsEls(); return [...S.sel].sort((a, b) => a - b).map(i => els[i] && els[i].textContent.trim()).filter(Boolean); }
+let lsMiniT = 0, lsMiniN = 0;
+function lsInPaint() {
+  const S = lsIn; if (!S) return; const n = S.sel.size;
+  // attributes, not classes: the karaoke loop rewrites each line's className on every line change
+  lsEls().forEach((p, i) => { const on = S.sel.has(i);
+    if (on) { p.setAttribute("data-lsel", ""); p.setAttribute("data-lse", (!S.sel.has(i - 1) ? "t" : "") + (!S.sel.has(i + 1) ? "b" : "")); }
+    else { p.removeAttribute("data-lsel"); p.removeAttribute("data-lse"); } });
+  S.ui.querySelector(".lsiCnt").textContent = `${n}/${LS_MAX} ${v25L(n === 1 ? "line" : "lines", n === 1 ? "line" : "lines", "लाइन")}`;
+  S.ui.querySelector(".lsiTxt b").textContent = `${n} ${v25L(n === 1 ? "line" : "lines", n === 1 ? "line" : "lines", "लाइन")}`;
+  S.ui.querySelector(".lsiGo span").textContent = `${v25L("Share", "Share", "शेयर")} · ${n}`;
+  if (window.LS_MINI) { // live thumbnail of the card (redrawn 250 ms after the selection settles)
+    clearTimeout(lsMiniT); const k = ++lsMiniN, m = S.ui.querySelector(".lsiMini"); m.classList.remove("ok");
+    lsMiniT = setTimeout(async () => { if (lsIn !== S) return; let cv; try { cv = await lyrCardDraw(S.t, lsInLines()); } catch (e) { return; }
+      if (k !== lsMiniN || lsIn !== S) return; const c = m.querySelector("canvas"), x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.clearRect(0, 0, c.width, c.height); x.drawImage(cv, 0, 0, c.width, c.height); m.classList.add("ok"); }, 250);
+  }
+}
+async function lsInGo() {
+  const S = lsIn; if (!S) return; const t = S.t, idx = [...S.sel].sort((a, b) => a - b), lines = lsInLines();
+  const go = S.ui.querySelector(".lsiGo"); go.classList.add("busy");
+  let cv; try { cv = await lyrCardDraw(t, lines); } catch (e) { go.classList.remove("busy"); toast(tr("Card nahi ban paya 😕")); return; }
+  go.classList.remove("busy");
+  lsExit();
+  const url = cv.toDataURL("image/png");
+  const link = t.src === "saavn" ? `https://dhun.sites.tab.bot/?song=${encodeURIComponent(t.id)}` : "https://dhun.sites.tab.bot/";
+  showSheet(`<div class="sgroup scBox lsBox"><img class="scPrev" src="${url}" alt=""><div class="scBtns"><button data-s="share" class="scGo">${esc(tr("Share karo"))} ${ICON.share}</button><button data-s="save">${esc(tr("Save karo"))} ${ICON.dl || ""}</button></div><button data-s="relines" data-notr>${esc(v25L("Change lines", "Lines badlo", "लाइन बदलो"))}</button></div>`, {
+    share: () => { lsShare(cv, t, link, lines); },
+    save: () => { lsSave(cv, t); },
+    relines: () => { setTimeout(() => { if (queue[qi] !== t || !lyrOpenNow) return; lsEnter(t, lsEls()[idx[0]]); if (lsIn) { lsIn.sel = new Set(idx.filter(i => i < lsEls().length)); lsInPaint(); } }, 60); },
+  });
+  window.__lsCard = { w: cv.width, h: cv.height, lines, link };
+}
+// "Save" straight from select mode (style W's bottom sheet): same card as Share, saved to the phone, select mode closes
+async function lsInSave() {
+  const S = lsIn; if (!S) return; const b = S.ui.querySelector('[data-lsi="save"]'); if (b) b.classList.add("busy");
+  let cv; try { cv = await lyrCardDraw(S.t, lsInLines()); } catch (e) { if (b) b.classList.remove("busy"); toast(tr("Card nahi ban paya 😕")); return; }
+  if (b) b.classList.remove("busy"); const t = S.t; lsExit(); lsSave(cv, t); window.__lsCard = { w: cv.width, h: cv.height, saved: 1 };
+}
+function lsShare(cv, t, link, lines) {
+  const txt = `“${lines.join(" / ")}”\n${t.title} — ${t.artist} 🎶 ${link}`;
+  if (V23_NATIVE && window.DhunNative && window.DhunNative.shareImage) { window.DhunNative.shareImage(cv, txt).catch(() => toast(tr("Card nahi ban paya 😕"))); return; }
+  lsBlob(cv, (b, name) => {
+    if (!b) return toast(tr("Card nahi ban paya 😕"));
+    const f = new File([b], name, { type: b.type });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) navigator.share({ files: [f], title: t.title, text: txt }).catch(() => {});
+    else lsSaveBlob(b, name);
+  }, t);
+}
+// PNG card; when the PNG would be heavier than ~2.4 MB (blurred photo backgrounds), the same pixels go out as JPEG 0.93
+function lsBlob(cv, cb, t) {
+  const base = scName(t).replace(/^dhun-/, "dhun-lyrics-").replace(/\.png$/, "");
+  cv.toBlob(b => { if (b && b.size > 2.4e6) cv.toBlob(j => cb(j || b, base + (j ? ".jpg" : ".png")), "image/jpeg", 0.93); else cb(b, base + ".png"); }, "image/png");
+}
+function lsSaveBlob(b, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); toast(tr("Card save ho gaya 📸")); }
+function lsSave(cv, t) { if (V23_NATIVE && window.DhunNative && window.DhunNative.shareImage) return scSave(cv, t); lsBlob(cv, (b, name) => b && lsSaveBlob(b, name), t); }
+// long-press on a lyric line used to make a one-line card straight away; now it enters select mode with that line selected
+const lsShareCardOld = shareCard;
+shareCard = function (t, line) {
+  if (line && lyrOpenNow && Date.now() - lyrLongPressed < 80 && t && lsLines(t).length) {
+    const els = lsEls(), want = String(line).trim();
+    let el = lsTouchEl && els.includes(lsTouchEl) && lsTouchEl.textContent.trim() === want ? lsTouchEl : els.find(e => e.textContent.trim() === want);
+    if (lsIn) { lsInTap(els.indexOf(el)); return; }
+    lsEnter(t, el || null); return;
+  }
+  return lsShareCardOld.apply(this, arguments);
+};
+{ const aw = lsAw();
+  if (aw) {
+    aw.addEventListener("touchstart", e => { lsTouchEl = e.target.closest && e.target.closest("#lyrPanel p.lline"); }, { passive: true, capture: true });
+    // in select mode a tap on a line selects it (no seek), a tap anywhere else on the lyrics does nothing (no flip back to the photo)
+    aw.addEventListener("click", e => {
+      if (!lsIn) return; e.stopImmediatePropagation(); e.preventDefault();
+      const b = e.target.closest && e.target.closest("[data-lsi]"); if (b) { if (b.dataset.lsi === "go") lsInGo(); else if (b.dataset.lsi === "save") lsInSave(); else lsExit(); return; }
+      const l = e.target.closest && e.target.closest("#lyrPanel p.lline"); if (l) lsInTap(lsEls().indexOf(l));
+    }, true);
+    aw.addEventListener("contextmenu", e => { if (lsIn) e.preventDefault(); });
+  }
+  const lp = $("#lyrPanel"); if (lp) { new MutationObserver(lsPillSync).observe(lp, { childList: true });
+    // the lyrics view resets its auto-scroll clock on every touch; keep it frozen while selecting
+    ["touchstart", "touchmove", "touchend", "wheel", "scroll"].forEach(ev => lp.addEventListener(ev, () => { if (lsIn) lyrUserScroll = Date.now() + 864e5; }, { passive: true })); }
+  new MutationObserver(lsPillSync).observe(np, { attributes: true, attributeFilter: ["class"] }); lsPillSync();
+}
+window.__ls = { enter: (el) => lsEnter(queue[qi], el || null), tap: lsInTap, go: lsInGo, exit: lsExit, lines: lsLines, sel: lsInLines, get st() { return lsIn; }, draw: (t, l) => lyrCardDraw(t, l) };
+/* ===== end lyrics share core v2 ===== */
+
+
+// ===== Lyrics share card — VARIANT Q: Cover colours: vibrant gradient from the cover's two dominant colours (like Spotify), white lyrics, white underline =====
+// Paste AFTER lyr-core2.js (in-place selection on the lyrics view). Defines lyrCardDraw(t, lines) -> 1080×1920 canvas.
+// Card = C3 polaroid (tilted, 2 tape strips, title + artist on the white strip, red ♪), app font only (SC2F), no "Mavi", small Dhun mark.
+window.LS_IN = "P"; window.LS_MINI = false;
+// ---- lyric-card helpers (lc*) — same in every variant file; paste only ONE variant ----
+function lcWrapAll(ctx, text, maxW) { // word wrap with no ellipsis; ok=false when one word alone is wider than maxW
+  const words = String(text || "").split(/\s+/).filter(Boolean), rows = []; let cur = "", ok = true;
+  for (const w of words) { const s = cur ? cur + " " + w : w; if (ctx.measureText(s).width <= maxW || !cur) { cur = s; if (ctx.measureText(cur).width > maxW) ok = false; } else { rows.push(cur); cur = w; if (ctx.measureText(w).width > maxW) ok = false; } }
+  if (cur) rows.push(cur); return { rows, ok };
+}
+// biggest size where every lyric line fits (wrapped) inside maxW × maxH; returns {px, lh, paras:[[rows]], h}
+function lcBal(ctx, text, maxW) { // same row count, but even rows (no lonely last word)
+  const r = lcWrapAll(ctx, text, maxW); if (r.rows.length < 2 || !r.ok) return r;
+  let lo = maxW * 0.5, hi = maxW, best = r;
+  for (let k = 0; k < 9; k++) { const m = (lo + hi) / 2, s = lcWrapAll(ctx, text, m); if (s.ok && s.rows.length === r.rows.length) { best = s; hi = m; } else lo = m; }
+  return best;
+}
+function lcFit(ctx, lines, maxW, maxH, sizes, fontAt, lhK, gapK) {
+  let best = null;
+  for (const px of sizes) {
+    ctx.font = fontAt(px); const lh = Math.round(px * lhK), gap = Math.round(px * (gapK || 0)); let ok = true, n = 0; const paras = [];
+    for (const l of lines) { const r = lcBal(ctx, l, maxW); if (!r.ok) ok = false; paras.push(r.rows); n += r.rows.length; }
+    const h = n * lh + (lines.length - 1) * gap; best = { px, lh, gap, paras, h };
+    if (ok && h <= maxH) return best;
+  }
+  ctx.font = fontAt(best.px); return best;
+}
+async function lcFonts(lines, fams) { const sample = (lines.join(" ") + " Aa").slice(0, 200); try { await Promise.all(fams.map(f => document.fonts.load(f, sample))); } catch (e) {} }
+function lcVivid(c, Lmin, Lmax) { // keep hue, push saturation up a little, clamp brightness for white text
+  const m = (c[0] + c[1] + c[2]) / 3; let v = c.map(x => Math.max(0, Math.min(255, m + (x - m) * 1.25)));
+  const l = 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  if (l > Lmax) v = v.map(x => x * Lmax / l); else if (l < Lmin && l > 1) v = v.map(x => Math.min(255, x * Lmin / l));
+  return v.map(Math.round);
+}
+
+
+// ---- H/I/J shared pieces: app font only (SC2F = DhunComic/Comic Neue stack + system Devanagari), no handwriting font ----
+const LCF = px => `700 ${px}px ${SC2F}`;
+// soft paper mottling that compresses well (low-frequency, no per-pixel grain)
+function lcMottle(w, h, seed, a) { const n = 24, c = document.createElement("canvas"); c.width = n; c.height = Math.round(n * h / w); const x = c.getContext("2d"), d = x.createImageData(c.width, c.height); let s = seed || 7; const rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+  for (let i = 0; i < d.data.length; i += 4) { const v = rnd() > 0.5 ? 255 : 0; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = rnd() * a; } x.putImageData(d, 0, 0);
+  let cur = c; for (const k of [3, 3, 3]) { const u = document.createElement("canvas"); u.width = cur.width * k; u.height = cur.height * k; const ux = u.getContext("2d"); ux.imageSmoothingEnabled = true; ux.imageSmoothingQuality = "high"; ux.drawImage(cur, 0, 0, u.width, u.height); cur = u; } return cur; } // stepped upscale = soft clouds, no blocks
+function lcTape(ctx, x, y, w, h, r, col) { ctx.save(); ctx.translate(x, y); ctx.rotate(r); ctx.shadowColor = "rgba(0,0,0,.18)"; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2; ctx.fillStyle = col || "rgba(236,226,200,.78)"; ctx.fillRect(-w / 2, -h / 2, w, h); ctx.shadowColor = "transparent"; ctx.fillStyle = "rgba(255,255,255,.22)"; ctx.fillRect(-w / 2, -h / 2, w, 5); ctx.restore(); }
+// polaroid frame drawn at (0,0) in the current transform: white frame, photo, title + artist on the strip, red ♪
+function lcPolaroid(ctx, art, t, fw, pp, strip, opt) {
+  opt = opt || {}; const photo = fw - pp * 2, fh = pp + photo + strip;
+  ctx.save(); ctx.shadowColor = opt.shadow || "rgba(0,0,0,.55)"; ctx.shadowBlur = 60; ctx.shadowOffsetY = 26; ctx.fillStyle = "#f6f2ea"; ctx.fillRect(0, 0, fw, fh); ctx.restore();
+  let g = ctx.createLinearGradient(0, 0, fw, fh); g.addColorStop(0, "rgba(255,255,255,.5)"); g.addColorStop(1, "rgba(170,150,120,.14)"); ctx.fillStyle = g; ctx.fillRect(0, 0, fw, fh);
+  sc2Art(ctx, art, pp, pp, photo, photo, 3);
+  ctx.strokeStyle = "rgba(0,0,0,.08)"; ctx.lineWidth = 2; ctx.strokeRect(pp, pp, photo, photo);
+  ctx.textAlign = "center"; const tw = fw - 150;
+  const T = sc2Fit(ctx, t.title || "", tw, 1, [56, 52, 48, 44, 40, 36], 700); ctx.fillStyle = "#24201c"; ctx.fillText(T.lines[0] || "", fw / 2, pp + photo + strip * 0.46);
+  ctx.font = sc2Font(400, 34); ctx.fillStyle = "rgba(36,32,28,.62)"; ctx.fillText(scWrap(ctx, t.artist || "", tw, 1)[0] || "", fw / 2, pp + photo + strip * 0.46 + 52);
+  ctx.save(); ctx.font = `700 56px ${SC2F}`; ctx.fillStyle = "#fa2d48"; ctx.translate(fw - 52, fh - 34); ctx.rotate(0.18); ctx.fillText("♪", 0, 0); ctx.restore();
+  return fh;
+}
+// lyric rows centred at cx starting at y0 (top); returns {y: baseline-of-next, lastW, lastY}
+function lcRows(ctx, L, cx, y0, col, shadow) {
+  ctx.save(); ctx.font = LCF(L.px); ctx.textAlign = "center"; ctx.fillStyle = col; if (shadow) { ctx.shadowColor = shadow; ctx.shadowBlur = 14; ctx.shadowOffsetY = 3; }
+  let y = y0 + L.px * 0.9, lastW = 0, lastY = y;
+  L.paras.forEach(rows => { rows.forEach(r => { ctx.fillText(r, cx, y); lastW = ctx.measureText(r).width; lastY = y; y += L.lh; }); y += L.gap; });
+  ctx.restore(); return { lastW, lastY };
+}
+function lcUnderline(ctx, cx, y, w, lw, col) { ctx.save(); ctx.strokeStyle = col || "#fa2d48"; ctx.lineWidth = lw || 7; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(cx - w / 2, y); ctx.quadraticCurveTo(cx, y + 9, cx + w / 2, y - 2); ctx.stroke(); ctx.restore(); }
+function lcBlurBg(ctx, art, W, H, dark) {
+  const col = sc2Deep(sc2Color(art, [90, 40, 90]), 110); ctx.fillStyle = sc2Rgb(sc2Deep(col, 40)); ctx.fillRect(0, 0, W, H);
+  const blur = art ? sc2Blur(art, W, H, 0.75) : null; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  if (blur) ctx.drawImage(blur, -80, -80, W + 160, H + 160);
+  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, `rgba(6,4,10,${dark[0]})`); g.addColorStop(0.55, `rgba(6,4,10,${dark[1]})`); g.addColorStop(1, `rgba(6,4,10,${dark[2]})`); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  return blur;
+}
+
+
+// ---- P/Q/R/S shared pieces: app font only, no handwriting font ----
+
+// ---- P/Q/R/S shared: one layout (C3 polaroid), four colour treatments ----
+function lcMix(a, b, k) { return a.map((x, i) => Math.round(x + (b[i] - x) * k)); }
+function lcLum(c) { return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
+function lcHsl(c) { const r = c[0] / 255, g = c[1] / 255, b = c[2] / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2; let h = 0, s = 0;
+  if (mx !== mn) { const d = mx - mn; s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60; } return [h, s, l]; }
+// two dominant colours of the cover (vibrant first), like Spotify's backgrounds; fallback = the app's cover colour
+function lcPalette(art, fb) {
+  const base = sc2Color(art, fb || [90, 40, 90]); if (!art) return [base, sc2Deep(base, 60)];
+  let d; try { const c = document.createElement("canvas"); c.width = c.height = 32; const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(art, 0, 0, 32, 32); d = x.getImageData(0, 0, 32, 32).data; } catch (e) { return [base, sc2Deep(base, 60)]; }
+  const bins = new Map();
+  for (let i = 0; i < d.length; i += 4) { const c = [d[i], d[i + 1], d[i + 2]], [h, s, l] = lcHsl(c); if (l < 0.08 || l > 0.94) continue;
+    const k = (s < 0.18 ? "g" : Math.round(h / 24) % 15) + ":" + Math.min(3, Math.floor(l * 4)); let b = bins.get(k); if (!b) bins.set(k, b = { n: 0, r: 0, g: 0, b: 0, s: 0, h, grey: s < 0.18 });
+    b.n++; b.r += c[0]; b.g += c[1]; b.b += c[2]; b.s += s; }
+  const L = [...bins.values()].map(b => ({ c: [b.r / b.n, b.g / b.n, b.b / b.n].map(Math.round), n: b.n, s: b.s / b.n, h: b.h, grey: b.grey, score: b.n * (0.35 + b.s / b.n) * (b.grey ? 0.45 : 1) })).sort((a, b) => b.score - a.score);
+  if (!L.length) return [base, sc2Deep(base, 60)];
+  const a = L[0], hd = (x, y) => { const z = Math.abs(x - y) % 360; return Math.min(z, 360 - z); };
+  const b = L.find(o => o !== a && (o.grey !== a.grey || hd(o.h, a.h) > 35) && o.n > 10) || L[1] || a;
+  return [a.c, b === a ? sc2Deep(a.c, 70) : b.c];
+}
+function lcFromHsl(h, s, l) { const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1))); return [f(0), f(8), f(4)].map(v => Math.round(v * 255)); }
+// pastel of a colour: same hue, saturation lifted (grey covers still get a soft tint), lightness high
+function lcPastel(c, l, smin) { const [h, s] = lcHsl(c); return lcFromHsl(h, Math.min(0.75, Math.max(smin || 0.42, s)), l); }
+const LC_FIT = [132, 124, 116, 108, 100, 92, 86, 80, 74, 68, 62, 56, 50, 46, 42];
+// the C3 card: tilted taped polaroid (title + artist on the strip, red ♪), the chosen lines auto-sized to fill, underline, small Dhun mark.
+// o = { txt, txtShadow, ul (underline colour), brand (mark colour), polShadow, tape }
+function lcCard(ctx, W, H, art, mark, t, lines, o) {
+  let fw = 780, pp = 42, strip = 170, fh = pp + (fw - pp * 2) + strip; const gapPL = 96, ulGap = 92, brandH = 56, mTop = 120, mBot = 110;
+  let maxH = H - mTop - mBot - fh - gapPL - ulGap - brandH;
+  let L = lcFit(ctx, lines, 900, maxH, LC_FIT, LCF, 1.24, 0.16);
+  if (L.px < 66) { fw = 640; pp = 36; strip = 150; fh = pp + (fw - pp * 2) + strip; maxH = H - mTop - mBot - fh - gapPL - ulGap - brandH; L = lcFit(ctx, lines, 900, maxH, LC_FIT, LCF, 1.24, 0.16); } // long text: smaller polaroid, bigger lyrics
+  const total = fh + gapPL + L.h + ulGap + brandH;
+  const fy = Math.max(mTop, Math.round((H - total) / 2)), fx = (W - fw) / 2;
+  ctx.save(); ctx.translate(W / 2, fy + fh / 2); ctx.rotate(-0.045); ctx.translate(-fw / 2, -fh / 2); lcPolaroid(ctx, art, t, fw, pp, strip, { shadow: o.polShadow }); ctx.restore();
+  lcTape(ctx, fx + 70, fy + 14, 200, 56, -0.6, o.tape); lcTape(ctx, fx + fw - 64, fy + 6, 200, 56, 0.55, o.tape);
+  const r = lcRows(ctx, L, W / 2, fy + fh + gapPL, o.txt, o.txtShadow);
+  lcUnderline(ctx, W / 2, r.lastY + L.px * 0.5, Math.min(860, Math.max(260, r.lastW * 0.8)), Math.max(6, Math.round(L.px * 0.075)), o.ul);
+  ctx.globalAlpha = 0.9; sc2Brand(ctx, mark, W / 2, fy + total - brandH, brandH, "center", o.brand); ctx.globalAlpha = 1;
+  return L;
+}
+async function lcStart(t, lines) {
+  const W = 1080, H = 1920, cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d");
+  await lcFonts([...lines, t.title || ""], ['700 80px "DhunComic"', '400 40px "DhunComic"']);
+  const { art, mark } = await sc2Assets(t); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  return { W, H, cv, ctx, art, mark };
+}
+
+async function lyrCardDraw(t, lines) {
+  const { W, H, cv, ctx, art, mark } = await lcStart(t, lines);
+  const [a0, b0] = lcPalette(art, [90, 40, 120]);
+  const hs = (c, l) => { const [h, s] = lcHsl(c); return lcFromHsl(h, Math.min(0.85, Math.max(0.42, s * 1.2)), l); }; // vivid even for greyish covers
+  const a = hs(a0, 0.40), b = hs(b0, 0.24), mid = lcMix(a, b, 0.5);
+  let g = ctx.createLinearGradient(0, 0, W * 0.35, H); g.addColorStop(0, sc2Rgb(a)); g.addColorStop(0.55, sc2Rgb(mid)); g.addColorStop(1, sc2Rgb(sc2Deep(b, 45))); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // soft light glows in the cover colours, then a gentle dark fade at the bottom so the white lyrics always read
+  g = ctx.createRadialGradient(W * 0.15, H * 0.12, 40, W * 0.15, H * 0.12, W * 0.95); g.addColorStop(0, sc2Rgb(lcMix(a, [255, 255, 255], 0.28), 0.55)); g.addColorStop(1, sc2Rgb(a, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  g = ctx.createRadialGradient(W * 0.95, H * 0.7, 40, W * 0.95, H * 0.7, W * 0.9); g.addColorStop(0, sc2Rgb(hs(b0, 0.45), 0.45)); g.addColorStop(1, sc2Rgb(b, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  g = ctx.createLinearGradient(0, H * 0.45, 0, H); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.32)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 0.12; ctx.drawImage(lcMottle(W, H, 5, 60), 0, 0, W, H); ctx.globalAlpha = 1;
+  lcCard(ctx, W, H, art, mark, t, lines, { txt: "#ffffff", txtShadow: "rgba(0,0,0,.28)", ul: "rgba(255,255,255,.92)", brand: "#ffffff", polShadow: "rgba(0,0,0,.45)" });
+  return cv;
+}
+/* ===== end lyrics card variant Q ===== */
+
+// ===== Lyrics select STYLE W — live card preview: picked lines white bold; glass sheet at the bottom with a live thumbnail of card Q + Share / Save =====
+// Paste AFTER lyr-core2.js and variant-Q.js (card Q), before the final `})();`. Only changes how select mode LOOKS;
+// selection rules, Share sheet, Android back, history etc. stay in lyr-core2.js. Paste only ONE lyr-sel-X.js.
+window.LS_IN = "W"; window.LS_MINI = true; // core redraws the thumbnail 250 ms after the selection settles
+const LSW_SAVE = '<svg viewBox="0 0 24 24"><path d="M11 3h2v9.2l3.3-3.3 1.4 1.4-5.7 5.7-5.7-5.7 1.4-1.4 3.3 3.3zM5 18h14v2H5z"/></svg>';
+function lsSelBuild(S) {
+  S.ui.innerHTML = `<div class="lsiTop"><button type="button" class="lsiX" data-lsi="x">${esc(v25L("Cancel", "Cancel", "रद्द"))}</button><div class="lsiCnt"></div></div>
+    <div class="lsiBar"><div class="lsiMini"><canvas width="216" height="384"></canvas></div>
+    <div class="lsiSide"><div class="lsiTxt"><b></b><small></small><i></i></div>
+    <div class="lsiBtns"><button type="button" class="lsiGo" data-lsi="go">${ICON.share}<span></span></button><button type="button" class="lsiSave" data-lsi="save">${LSW_SAVE}<span>${esc(v25L("Save", "Save", "सेव"))}</span></button></div></div></div>`;
+}
+function lsSelPaint(S, n) {
+  S.ui.querySelector(".lsiGo span").textContent = v25L("Share", "Share", "शेयर");
+  S.ui.querySelector(".lsiTxt b").textContent = v25L("Story card", "Story card", "स्टोरी कार्ड");
+  S.ui.querySelector(".lsiTxt small").textContent = S.t.title || "";
+  S.ui.querySelector(".lsiTxt i").textContent = `${n} ${v25L(n === 1 ? "line" : "lines", n === 1 ? "line" : "lines", "लाइन")} · 1080×1920`;
+}
+function lsSelAfter(S) { lsSelCenter(S); }
+
+// the lyrics view grows in this style (player controls step aside) → bring the picked line back to ~1/3 from the top
+function lsSelCenter(S) { requestAnimationFrame(() => requestAnimationFrame(() => { if (lsIn !== S) return; const lp = $("#lyrPanel"), p = lsEls()[Math.min(...S.sel)]; if (!lp || !p) return; lp.scrollTo({ top: Math.max(0, p.offsetTop - lp.clientHeight * 0.34), behavior: "smooth" }); })); }
+
+(function () { // wrap the core: build this style's controls after lsEnter, repaint them after every lsInPaint
+  const enter0 = lsEnter, paint0 = lsInPaint;
+  lsEnter = function (t, el) { enter0(t, el); const S = lsIn; if (!S || S.ui.dataset.sty) return; S.ui.dataset.sty = window.LS_IN; lsSelBuild(S); lsInPaint(); lsSelAfter(S); };
+  lsInPaint = function () { paint0(); const S = lsIn; if (S && S.ui.dataset.sty) lsSelPaint(S, S.sel.size); };
+})();
+/* ===== end lyrics select style W ===== */
+
+/* ===== end v1.0.8 lyrics share ===== */
+
+/* ===== v1.0.8 fix: Podcasts fallback — when the site's /api/pod/* calls fail (Apple refuses the server), fetch Apple straight from the phone (CORS *) ===== */
+const PODX_G = { comedy: 1303, society: 1324, education: 1304, spiritual: 1314, crime: 1488, kids: 1305, health: 1512, business: 1321, arts: 1301, sports: 1545, news: 1489, history: 1487 };
+const PODX_GT = { comedy: "😂 Comedy", society: "🧑‍🤝‍🧑 Society & Culture", education: "📚 Education", spiritual: "🙏 Dharm & Spirituality", crime: "🕵️ True Crime", kids: "🧸 Kids & Family", health: "💪 Health", business: "💼 Business", arts: "🎭 Arts", sports: "🏏 Sports", news: "📰 News", history: "🏛️ History" };
+const PODX_ROWS = [["top", "🇮🇳 Top India"], ["q:hindi podcast", "🎙️ Hindi Podcasts"], ["q:hindi kahaniyan", "📖 Hindi Kahaniyan"], ["q:bollywood podcast", "🎬 Bollywood"], ["g:comedy"], ["g:spiritual"], ["q:hindi motivation", "🔥 Motivation"], ["g:crime"]];
+const podxArt = (u, s = 600) => String(u || "").replace(/\/\d+x\d+(bb)?\.(jpg|jpeg|png|webp)$/i, `/${s}x${s}bb.jpg`);
+const podxOf = r => ({ id: String(r.collectionId || r.id || ""), title: r.collectionName || r.name || "", author: r.artistName || "", image: podxArt(r.artworkUrl600 || r.artworkUrl100 || ""), feed: r.feedUrl || "", genre: r.primaryGenreName || "" });
+let podxC = store.get("podxC", {}); const podxFeed = store.get("podxFeed", {}); // memo (6 h) + show id -> feed url
+function podxRemember(items) { let n = 0; (items || []).forEach(x => { if (x && x.id && x.feed && podxFeed[x.id] !== x.feed) { podxFeed[x.id] = x.feed; n++; } });
+  if (n) { const ks = Object.keys(podxFeed); if (ks.length > 600) ks.slice(0, ks.length - 600).forEach(k => delete podxFeed[k]); store.set("podxFeed", podxFeed); } }
+async function podxJson(u, ms = 9000) { const c = new AbortController(), tm = setTimeout(() => c.abort(), ms);
+  try { const r = await fetch(u, { signal: c.signal, credentials: "omit" }); if (!r.ok) throw new Error("apple " + r.status); return await r.json(); } finally { clearTimeout(tm); } }
+async function podxMemo(k, fn) { const m = podxC[k]; if (m && Date.now() - m.at < 6 * 3600e3) return m.v;
+  const v = await fn(); if (v && (v.length || v.rows)) { podxC[k] = { at: Date.now(), v }; const ks = Object.keys(podxC); if (ks.length > 40) ks.sort((a, b) => podxC[a].at - podxC[b].at).slice(0, ks.length - 40).forEach(x => delete podxC[x]); try { store.set("podxC", podxC); } catch (e) {} }
+  return v; }
+const podxSearch = (q, limit = 30) => podxMemo("s:" + limit + ":" + q.toLowerCase(), async () => { const d = await podxJson(`https://itunes.apple.com/search?media=podcast&entity=podcast&country=IN&limit=${limit}&term=${encodeURIComponent(q)}`); return (d.results || []).filter(x => x.collectionId && x.feedUrl).map(podxOf); });
+const podxChart = g => podxMemo("c:" + (g || "top"), async () => { const d = await podxJson(`https://itunes.apple.com/in/rss/toppodcasts/limit=50${g && PODX_G[g] ? "/genre=" + PODX_G[g] : ""}/json`); const es = (d.feed && d.feed.entry) || [];
+  return (Array.isArray(es) ? es : [es]).map(e => ({ id: String(e.id && e.id.attributes && e.id.attributes["im:id"] || ""), title: (e["im:name"] || {}).label || "", author: (e["im:artist"] || {}).label || "", image: podxArt(((e["im:image"] || []).slice(-1)[0] || {}).label || ""), feed: "", genre: (e.category && e.category.attributes && e.category.attributes.label) || "" })).filter(x => x.id); });
+const podxTop = key => String(key || "").startsWith("q:") ? podxSearch(key.slice(2), 30) : podxChart(key);
+const podxHome = () => podxMemo("home", async () => { const rows = await Promise.all(PODX_ROWS.map(async ([k, title]) => { try { const g = k.startsWith("g:") ? k.slice(2) : k === "top" ? "" : null;
+    const items = g !== null ? await podxChart(g) : await podxSearch(k.slice(2), 25); return { key: g ? g : k, title: title || PODX_GT[g] || k, items: items.slice(0, 25) }; } catch (e) { return null; } }));
+  const out = rows.filter(r => r && r.items.length); return out.length ? { rows: out, genres: Object.keys(PODX_G).map(k => ({ key: k, title: PODX_GT[k] })) } : null; });
+// server first, Apple from the phone when the server answers an error / nothing
+async function podxList(path, fb) { let d = null; try { d = await api(path); } catch (e) { d = null; }
+  if (d && !d.error && d.items && d.items.length) { podxRemember(d.items); return d.items; }
+  const v = await fb(); podxRemember(v); return v; }
+podSearchRun = function (q) {
+  q = String(q || "").trim(); podSt.q = q; podSt.gkey = ""; podSt.items = null; podSt.err = false; podSt.show = 50;
+  if (!q) return podRefresh("pods");
+  podSt.busy = true; podRefresh("pods"); const my = (podSt.tok = Math.random());
+  podxList("/api/pod/search?q=" + encodeURIComponent(q), () => podxSearch(q)).then(v => { if (my === podSt.tok) podSt.items = v || []; }).catch(() => { if (my === podSt.tok) podSt.err = true; })
+    .finally(() => { if (my === podSt.tok) { podSt.busy = false; podRefresh("pods"); } });
+};
+podGenre = function (key, title) {
+  podSt.q = ""; podSt.gkey = key; podSt.gtitle = title || key; podSt.items = null; podSt.err = false; podSt.busy = true; podRefresh("pods"); view.scrollTop = 0;
+  const my = (podSt.tok = Math.random());
+  podxList("/api/pod/top?genre=" + encodeURIComponent(key), () => podxTop(key)).then(v => { if (my === podSt.tok) podSt.items = v || []; }).catch(() => { if (my === podSt.tok) podSt.err = true; })
+    .finally(() => { if (my === podSt.tok) { podSt.busy = false; podRefresh("pods"); } });
+};
+podLoadHome = function (force) {
+  if (podHomeBusy || (!force && podHome && Date.now() - (podHome.at || 0) < 6 * 3600e3)) return;
+  podHomeBusy = true; podHomeErr = false;
+  const keep = d => { podHome = { rows: d.rows, genres: d.genres || [], at: Date.now() }; store.set("podHomeCache", podHome); d.rows.forEach(r => podxRemember(r.items)); };
+  api("/api/pod/top").then(d => { if (d && !d.error && d.rows && d.rows.length) keep(d); else throw new Error("x"); })
+    .catch(() => podxHome().then(d => { if (d) keep(d); else podHomeErr = !podHome; }).catch(() => { podHomeErr = !podHome; }))
+    .finally(() => { podHomeBusy = false; podRefresh("pods"); });
+};
+podLoadShow = function (id, force) {
+  const c = podShows.get(id); if (c && (c.loading || (c.data && !force))) return;
+  podShows.set(id, { loading: 1, data: c && c.data });
+  const sub = podSubs.find(x => x.id === id), ok = d => !!(d && !d.error && d.episodes);
+  const get = feed => api("/api/pod/show?id=" + encodeURIComponent(id) + (feed ? "&feed=" + encodeURIComponent(feed) : "")).catch(() => null);
+  (async () => {
+    let feed = podxFeed[id] || (sub && sub.feed) || ""; let d = await get(feed);
+    if (!ok(d) && /^\d{3,15}$/.test(id)) { // ask Apple for the feed from the phone, then let the server read the feed itself
+      try { const L = await podxJson(`https://itunes.apple.com/lookup?id=${id}&entity=podcast&country=IN`); const x = (L.results || []).find(z => z.collectionId && z.feedUrl);
+        if (x) { podxRemember([podxOf(x)]); if (x.feedUrl !== feed) { feed = x.feedUrl; d = await get(feed); } if (ok(d)) { const m = podxOf(x); d = { ...d, title: d.title || m.title, author: d.author || m.author, image: d.image || m.image, genre: d.genre || m.genre }; } } } catch (e) {}
+    }
+    if (!ok(d)) throw new Error(d && d.error || "x");
+    podShows.set(id, { data: d }); if (sub && d.image) { sub.image = d.image; sub.title = d.title || sub.title; store.set("podSubs", podSubs); }
+  })().catch(() => podShows.set(id, { err: 1, data: c && c.data })).finally(() => podRefresh("pod:" + id));
+};
+window.__podx = { search: podxSearch, chart: podxChart, home: podxHome, feeds: () => podxFeed };
+try { if (window.__pod) window.__pod.search = podSearchRun; } catch (e) {}
+/* ===== end v1.0.8 podcasts fallback ===== */
+
 })();
