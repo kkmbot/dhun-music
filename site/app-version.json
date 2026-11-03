@@ -1,10 +1,10 @@
 {
-  "versionCode": 23,
-  "versionName": "1.0.8",
+  "versionCode": 24,
+  "versionName": "1.0.9",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "🎵 Lyrics card: line long-press → Share/Save · 🔥 Trending · 🆕 New from your artists · 📻 Decade charts · 🔤 Galat spelling search · 👈 Queue swipe · 🔄 Taste sync · 🎙️ Podcasts fix",
+  "notes": "📱 Tablet/foldable design: side menu, bottom player bar, cover + lyrics side by side · 📊 Better stats for admin · fixes",
   "force": false,
-  "size": 5053857,
-  "bytes": 5053857,
-  "sha256": "4854f7333c0a5c06c691b6144fe719352e44960f594ce0dbf2a02c065e4b7aae"
+  "size": 5059001,
+  "bytes": 5059001,
+  "sha256": "16daab8297f9fd2aa0f90e0523ed91243e6e050426d8767ff1f9865cb3789e71"
 }
