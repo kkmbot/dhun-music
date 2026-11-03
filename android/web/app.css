@@ -1127,3 +1127,97 @@ h2.onbRowH>a{flex:0 0 auto}
 #np.lsInW .lsiSave.busy{opacity:.7}
 /* ===== end lyrics select style W ===== */
 
+/* ===== v1.0.9: big screens — layout A ===== */
+/* big screens (injected elements are hidden on phones) */
+#tabs .bgLogo,#tabs .bgSet,#tabs .bgHd,#mini .bgPrev,#mini .bgTime,#mini .bgVol{display:none}
+@media (min-width:820px){
+:root{--bgT:178px}
+
+/* -- big: bigger tiles, more per row -- */
+.tile{width:var(--bgT)}
+.tile img{width:var(--bgT);height:var(--bgT)}
+.grid .tile,.grid .tile img{width:100%;height:auto}
+.crdA{width:var(--bgT);flex:0 0 var(--bgT)}
+.crdA .crdArt{width:var(--bgT);height:var(--bgT)}
+.crdA .crdBig{font-size:26px}
+.car{gap:18px;scroll-padding-left:20px}
+.tile .t1{font-size:15px}
+
+/* -- big: Now Playing two-pane (cover + lyrics/queue) -- */
+#np.lopen .npInner,#np.qopen .npInner{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);grid-template-rows:auto minmax(0,1fr) auto auto auto auto auto auto minmax(0,.35fr);column-gap:clamp(28px,5vw,80px);max-width:1240px;margin:0 auto;padding:calc(var(--st) + 14px) clamp(24px,4vw,64px) calc(var(--sb) + 26px);overflow:hidden;box-sizing:border-box}
+#np.lopen #npArtWrap,#np.qopen #npArtWrap{display:contents}
+#np.lopen #npClose,#np.qopen #npClose{grid-column:1/-1;grid-row:1;justify-self:center;margin-bottom:2vh}
+#np.lopen #npArt,#np.lopen #yt,#np.qopen #npArt,#np.qopen #yt{grid-column:1;grid-row:2;align-self:end;justify-self:center;width:auto;height:auto;max-width:100%;max-height:min(100%,56vh);aspect-ratio:1;opacity:1;margin:1vh 0 3vh;box-shadow:0 22px 50px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.08);pointer-events:auto}
+#np.lopen #yt,#np.qopen #yt{width:100%;height:auto}
+#np.lopen .npMeta,#np.qopen .npMeta{grid-column:1;grid-row:3}
+#np.lopen #seekWrap,#np.qopen #seekWrap{grid-column:1;grid-row:4}
+#np.lopen #npStatus,#np.qopen #npStatus{grid-column:1;grid-row:5}
+#np.lopen #npJamBar,#np.qopen #npJamBar{grid-column:1;grid-row:6}
+#np.lopen .ctrls,#np.qopen .ctrls{grid-column:1;grid-row:7}
+#np.lopen .npBottom,#np.qopen .npBottom{grid-column:1;grid-row:8;margin-top:6px}
+#np.lopen #npThumb,#np.qopen #npThumb{display:none}
+#np.lopen #npTitle,#np.qopen #npTitle{font-size:24px}
+#np.lopen #lyrPanel,#np.lopen #lsUi,#np.lopen #lsPill{grid-column:2;grid-row:2/-1}
+#np.lopen #lyrPanel{position:absolute;inset:0}
+#np.lopen #lsUi{position:absolute;inset:0}
+#np.lopen #lsPill{position:absolute;inset:auto 8px 10px auto;align-self:end;justify-self:end}
+#np.lopen:not(.bgDock) .lyrBody.am p,#np.lopen:not(.bgDock) .lyrBody.synced p{font-size:clamp(27px,2.5vw,38px)}
+#np.lopen:not(.bgDock) #lyrPanel.lyrPlainMode .lyrBody.plain{font-size:clamp(22px,2vw,30px)}
+#np.qopen #queuePanel{grid-column:2;grid-row:2/-1;margin:0;max-height:none;min-height:0;overflow-y:auto}
+#np.qopen:not(.lopen) #lyrPanel{display:none}
+
+#view{max-width:1000px;margin:0 auto}
+#tabs,body.tabsMini #tabs{left:calc(50% - 270px);right:calc(50% - 270px)}
+#mini,body.tabsMini #mini{left:max(12px,calc(50% - 488px));right:max(12px,calc(50% - 488px))}
+#dealTick{left:max(14px,calc(50% - 486px));right:max(14px,calc(50% - 486px))}
+}
+@media (min-width:900px){
+:root{--sbw:236px;--bgBar:82px;--bgT:188px}
+
+/* -- big: left sidebar instead of the bottom tab bar -- */
+#tabs,body.tabsMini #tabs{left:0;right:auto;top:0;bottom:0;width:var(--sbw);flex-direction:column;justify-content:flex-start;align-items:stretch;gap:4px;padding:calc(var(--st) + 92px) 14px 16px;border-radius:0;border:0;border-right:1px solid rgba(255,255,255,.08);background:rgba(16,14,20,.55);transform:none!important;box-shadow:none;z-index:20}
+body:has(#mini:not(.hidden)) #tabs{bottom:var(--bgBar)}
+#tabs button,body.tabsMini #tabs button{flex:none;flex-direction:row;justify-content:flex-start;align-items:center;gap:13px;padding:11px 14px;border-radius:12px;font-size:15.5px;font-weight:700;color:#c9c9cf}
+#tabs button span,body.tabsMini #tabs button span{opacity:1!important;max-height:none!important;overflow:visible}
+#tabs svg{width:22px;height:22px}
+#tabs button.on{color:#fff;background:rgba(250,45,72,.22);box-shadow:inset 0 0 0 1px rgba(250,45,72,.35)}
+#tabs button:hover{background:rgba(255,255,255,.07)}
+#tabs .bgLogo{display:block;position:absolute;left:22px;top:calc(var(--st) + 26px);height:42px;width:auto;filter:drop-shadow(0 2px 10px rgba(250,45,72,.25))}
+#tabs .bgSet{display:flex;margin-top:auto}
+#tabs .bgHd{display:block;margin:18px 14px 6px;font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:rgba(255,255,255,.42)}
+#view{max-width:none!important;margin:0 0 0 var(--sbw)!important;width:auto!important}
+#view .brandBar.v25bb img{visibility:hidden}
+#app::after{left:var(--sbw)}
+
+/* -- big: full-width player bar at the bottom -- */
+#mini,body.tabsMini #mini{left:0;right:0;bottom:0;height:var(--bgBar);border-radius:0;border:0;border-top:1px solid rgba(255,255,255,.1);padding:0 22px 0 18px;gap:10px;background:rgba(22,20,26,.82);z-index:21}
+#mini::before{border-radius:0}
+#mini #miniArt{width:54px;height:54px;border-radius:10px}
+#mini .miniText{flex:0 1 300px;min-width:120px}
+#mini #miniTitle{font-size:15px}
+#mini #miniArtist{font-size:13px}
+#mini .bgPrev{display:flex;margin-left:auto}
+#mini #miniPlay{width:52px;height:52px;border-radius:50%;background:#fff;color:#111}
+#mini #miniPlay svg{width:26px;height:26px;fill:#111}
+#mini #miniNext{margin-right:auto}
+#mini .bgPrev svg,#mini #miniNext svg{width:26px;height:26px;fill:#fff}
+#mini .bgTime{display:block;flex:none;min-width:96px;text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.65)}
+#mini .bgVol{display:flex;align-items:center;gap:8px;flex:none;width:150px;color:rgba(255,255,255,.75)}
+#mini .bgVol svg{width:20px;height:20px;fill:currentColor;flex:none}
+#mini .bgVol input{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;background:linear-gradient(90deg,#fff var(--v),rgba(255,255,255,.22) var(--v));outline:none}
+#mini .bgVol input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#fff;border:0}
+#mini .bgVol input::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:#fff;border:0}
+#mini #miniProg{left:0;right:0;top:0;bottom:auto;height:3px;border-radius:0}
+#dealTick,#mini.hidden ~ #dealTick{left:calc(var(--sbw) + 18px);right:18px}
+#dealTick{bottom:calc(var(--bgBar) + 12px)}
+#mini.hidden ~ #dealTick{bottom:14px}
+#view,body.hasTick #view{padding-bottom:calc(var(--bgBar) + 70px)}
+}
+
+@media (min-width:820px) and (pointer:fine){
+.car{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent;padding-bottom:6px}
+.car::-webkit-scrollbar{display:block;height:6px}
+.car::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:3px}
+#lyrPanel::-webkit-scrollbar{display:none}
+}
+/* ===== end v1.0.9 big screens A ===== */

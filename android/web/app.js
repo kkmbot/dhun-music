@@ -5508,4 +5508,62 @@ window.addEventListener("pagehide", () => { if (pgPend >= 1) pgSend("pagehide");
 window.__ping = { did: pgDid, pf: pgPf, v: PG_V, send: pgSend, state: () => ({ pend: pgPend, last: pgLast, sent: pgSent, playing: pgPlaying() }) };
 /* ===== end v1.0.9 usage heartbeat ===== */
 
+/* ===== v1.0.9: big screens — layout A (Apple Music style: sidebar ≥900px, bottom player bar, two-pane Now Playing) ===== */
+(function () { try {
+  const V = "A", W = matchMedia("(min-width:820px)"), D = matchMedia("(min-width:99999px)");
+  const $i = id => document.getElementById(id), np = $i("np"), mini = $i("mini"), tabs = $i("tabs"), wrap = $i("npArtWrap");
+  if (!np || !mini || !tabs || !wrap) return;
+  document.documentElement.classList.add("big" + V);
+  const mk = h => { const d = document.createElement("div"); d.innerHTML = h; return d.firstElementChild; };
+  const stop = el => ["click", "pointerdown", "pointerup", "touchstart", "touchend", "mousedown"].forEach(ev => el.addEventListener(ev, e => e.stopPropagation()));
+  if (true) {
+    tabs.prepend(mk('<img class="bgLogo" src="/logo-h2.webp" alt="Dhun">'));
+    const set = mk('<button type="button" class="bgSet"><svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg><span>Settings</span></button>');
+    set.addEventListener("click", e => { e.stopPropagation(); let g = document.querySelector('#view [data-act="settings"]'); if (g) return g.click(); const h = tabs.querySelector('button[data-tab="library"]'); h && h.click(); setTimeout(() => { g = document.querySelector('#view [data-act="settings"]'); g && g.click(); }, 60); });
+    tabs.appendChild(set);
+  }
+  if (true) {
+    const prev = mk('<button type="button" class="icon bgPrev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2.2v14H6zM9.6 12 19 5v14z"/></svg></button>');
+    prev.addEventListener("click", e => { e.stopPropagation(); const b = $i("npPrev"); b && b.click(); }); stop(prev);
+    mini.insertBefore(prev, $i("miniPlay"));
+    const tm = mk('<span class="bgTime"></span>'); mini.insertBefore(tm, $i("podMiniF") || null);
+    // Volume slider = a user MASTER volume that multiplies every volume the app sets (AutoMix crossfade gains, sleep-timer fade):
+    // the app keeps reading/writing its own "logical" volume, the element plays logical × master, so the two never fight.
+    // Only on the >=900px layout where the slider is visible; iPhone/iPad Safari ignore volume -> no slider there.
+    const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+    if (!iOS && typeof WeakRef === "function") {
+      const VW = matchMedia("(min-width:900px)"), P = HTMLMediaElement.prototype, dv = Object.getOwnPropertyDescriptor(P, "volume");
+      if (dv && dv.get && dv.set) {
+        let saved = Math.max(0, Math.min(1, +(localStorage.getItem("m_bgVol") || 1))); if (!(saved >= 0)) saved = 1;
+        let m = 1; const els = new Set();
+        const track = el => { if (el.__lv == null) { try { el.__lv = m > 0 ? Math.min(1, dv.get.call(el) / m) : 1; } catch (e) { el.__lv = 1; } } if (els.size > 40) for (const r of els) if (!r.deref()) els.delete(r); if (!el.__bgR) { el.__bgR = new WeakRef(el); els.add(el.__bgR); } };
+        const apply = el => { try { dv.set.call(el, Math.max(0, Math.min(1, (el.__lv == null ? 1 : el.__lv) * m))); } catch (e) {} };
+        Object.defineProperty(P, "volume", { configurable: true, enumerable: dv.enumerable,
+          get() { const raw = dv.get.call(this); if (m === 1 || this.__lv == null) return this.__lv != null && Math.abs(raw - this.__lv) < 0.002 ? this.__lv : raw; return Math.abs(raw - this.__lv * m) < 0.002 ? this.__lv : (m > 0 ? Math.min(1, raw / m) : this.__lv); },
+          set(v) { v = Math.max(0, Math.min(1, +v || 0)); this.__lv = v; track(this); dv.set.call(this, Math.max(0, Math.min(1, v * m))); } });
+        const play0 = P.play; P.play = function () { track(this); if (m !== 1) apply(this); return play0.apply(this, arguments); };
+        const setM = () => { const nm = VW.matches ? saved : 1; if (nm === m) return; document.querySelectorAll("audio,video").forEach(track); m = nm; for (const r of els) { const el = r.deref(); if (el) apply(el); else els.delete(r); } document.querySelectorAll("audio,video").forEach(el => { track(el); apply(el); }); };
+        const vol = mk('<label class="bgVol" aria-label="Volume"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9zm11.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM13 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg><input type="range" min="0" max="100"></label>');
+        stop(vol); mini.appendChild(vol);
+        const vi = vol.querySelector("input"); vi.value = Math.round(saved * 100); vi.style.setProperty("--v", vi.value + "%");
+        vi.addEventListener("input", () => { saved = vi.value / 100; try { localStorage.setItem("m_bgVol", String(saved)); } catch (e) {} vi.style.setProperty("--v", vi.value + "%"); setM(); });
+        (VW.addEventListener ? VW.addEventListener("change", setM) : VW.addListener(setM)); setM();
+        window.__bgVol = { get master() { return m; }, get saved() { return saved; }, raw: el => dv.get.call(el), set: v => { vi.value = Math.round(v * 100); vi.dispatchEvent(new Event("input")); } };
+      }
+    }
+    setInterval(() => { if (!W.matches || mini.classList.contains("hidden") || document.hidden) return; const c = $i("tCur"), d = $i("tDur"); if (c && d) tm.textContent = c.textContent + "  ·  " + d.textContent; }, 700);
+  }
+  // Now Playing on a big screen opens with lyrics beside the cover (tap the cover = hide them, remembered for this session)
+  let off = false, busy = 0;
+  wrap.addEventListener("click", e => { if (!e.isTrusted || !W.matches) return; const was = np.classList.contains("lopen"); setTimeout(() => { const now = np.classList.contains("lopen"); if (was !== now) off = !now; }, 60); }, true);
+  const wantLyr = () => W.matches && !off && !np.classList.contains("lopen") && !np.classList.contains("lsIn") && (np.classList.contains("open") || np.classList.contains("bgDock"));
+  const autoLyr = () => { if (!wantLyr() || busy) return; busy = setTimeout(() => { busy = 0; if (wantLyr()) wrap.click(); }, 380); };
+  const dock = () => { const on = false && D.matches && !mini.classList.contains("hidden"); np.classList.toggle("bgDock", on); document.body.classList.toggle("bgDocked", on); if (on) { np.setAttribute("aria-hidden", "false"); if (!np.classList.contains("open")) { np.classList.add("open"); np.__bgOpen = 1; } } else if (np.__bgOpen) { np.__bgOpen = 0; np.classList.remove("open"); } };
+  new MutationObserver(() => { dock(); autoLyr(); }).observe(np, { attributes: true, attributeFilter: ["class"] });
+  new MutationObserver(() => { dock(); autoLyr(); }).observe(mini, { attributes: true, attributeFilter: ["class"] });
+  const mq = () => { dock(); autoLyr(); }; (W.addEventListener ? W.addEventListener("change", mq) : W.addListener(mq)); (D.addEventListener ? D.addEventListener("change", mq) : D.addListener(mq));
+  dock();
+  window.__big = { V, dock, autoLyr, get off() { return off; } };
+} catch (e) {} })();
+/* ===== end v1.0.9 big screens A ===== */
 })();
