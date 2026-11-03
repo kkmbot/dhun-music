@@ -5477,4 +5477,35 @@ window.__podx = { search: podxSearch, chart: podxChart, home: podxHome, feeds: (
 try { if (window.__pod) window.__pod.search = podSearchRun; } catch (e) {}
 /* ===== end v1.0.8 podcasts fallback ===== */
 
+/* ===== v1.0.9: anonymous usage heartbeat (install id + listening seconds; no personal data, no song names) ===== */
+const pgDid = (() => { let d = store.get("did", ""); if (!/^[a-z0-9]{12,32}$/.test(d || "")) { try { const b = new Uint8Array(12); crypto.getRandomValues(b); d = Array.from(b, x => (x % 36).toString(36)).join(""); } catch (e) { d = (Date.now().toString(36) + Math.random().toString(36).slice(2) + "000000000000").slice(0, 16); } store.set("did", d); } return d; })();
+const pgPf = (() => { const ua = navigator.userAgent || ""; if (window.DHUN_NATIVE) return "android-app"; if (/iPhone|iPod/.test(ua)) return "web-iphone"; if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "web-ipad"; if (/Android/.test(ua)) return "web-android"; return "web-desktop"; })();
+const PG_V = "1.0.9", PG_EVERY = 300e3;
+let pgPend = Math.max(0, Math.min(86400, +store.get("lsPend", 0) || 0)), pgLast = Date.now() - PG_EVERY + 4000, pgBusy = false, pgTick = Date.now(), pgEl = null, pgCT = -1, pgSent = 0;
+function pgPlaying() { const a = audio; return !!(a && !a.paused && !a.ended && a.readyState >= 3); }
+function pgCount() {
+  const now = Date.now(), dt = (now - pgTick) / 1000; pgTick = now;
+  const a = audio, on = pgPlaying(), ct = a ? a.currentTime : -1;
+  if (on && dt > 0) { let inc = Math.min(dt, 70); if (a === pgEl && dt < 3 && Math.abs(ct - pgCT) < 0.15) inc = 0; pgPend = Math.min(86400, pgPend + inc); }
+  pgEl = a; pgCT = ct;
+}
+function pgSend(why) {
+  pgCount();
+  if (pgBusy || !navigator.onLine || Date.now() - pgLast < 6000) { store.set("lsPend", Math.round(pgPend * 10) / 10); return Promise.resolve(false); }
+  const ls = Math.floor(pgPend); pgPend -= ls; store.set("lsPend", Math.round(pgPend * 10) / 10);
+  const linked = !!(tgMe && tgMe.linked && tgCode);
+  const body = { did: pgDid, pf: pgPf, v: PG_V, ls, tg: linked ? 1 : 0, ...(linked ? { c: tgCode } : {}) };
+  pgBusy = true; pgLast = Date.now();
+  return fetch("/api/ping", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), keepalive: true })
+    .then(r => r.json()).then(j => { if (!j || !j.ok) throw 0; pgSent++; return true; })
+    .catch(() => { pgPend = Math.min(86400, pgPend + ls); store.set("lsPend", Math.round(pgPend * 10) / 10); return false; })
+    .finally(() => { pgBusy = false; });
+}
+let pgSave = 0;
+setInterval(() => { pgCount(); if (++pgSave % 10 === 0) store.set("lsPend", Math.round(pgPend * 10) / 10); if (!document.hidden && Date.now() - pgLast >= PG_EVERY) pgSend("timer"); }, 1000);
+document.addEventListener("visibilitychange", () => { if (document.hidden) { if (Date.now() - pgLast > 30e3 || pgPend >= 1) pgSend("hidden"); } else if (Date.now() - pgLast >= PG_EVERY) pgSend("visible"); });
+window.addEventListener("pagehide", () => { if (pgPend >= 1) pgSend("pagehide"); });
+window.__ping = { did: pgDid, pf: pgPf, v: PG_V, send: pgSend, state: () => ({ pend: pgPend, last: pgLast, sent: pgSent, playing: pgPlaying() }) };
+/* ===== end v1.0.9 usage heartbeat ===== */
+
 })();

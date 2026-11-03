@@ -13,3 +13,5 @@ CREATE TABLE IF NOT EXISTS bq (bid INTEGER, chat_id INTEGER, state INTEGER DEFAU
 -- logs channel: per-minute counter for the 20/min cap, and small key/value state (last log ok/error)
 CREATE TABLE IF NOT EXISTS logm (minute INTEGER PRIMARY KEY, n INTEGER DEFAULT 0, dropped INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+-- v1.0.9: anonymous usage heartbeat (random install id per app/browser; no personal data): first/last seen, platform, version, listening seconds, linked Telegram chat (0 = guest)
+CREATE TABLE IF NOT EXISTS devices (did TEXT PRIMARY KEY, first_at INTEGER, last_at INTEGER, pf TEXT, v TEXT, listen INTEGER DEFAULT 0, chat_id INTEGER DEFAULT 0, lday INTEGER DEFAULT 0, ltoday INTEGER DEFAULT 0, pings INTEGER DEFAULT 0);

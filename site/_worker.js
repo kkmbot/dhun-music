@@ -381,6 +381,7 @@ function db(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS logm (minute INTEGER PRIMARY KEY, n INTEGER DEFAULT 0, dropped INTEGER DEFAULT 0)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS bq (bid INTEGER, chat_id INTEGER, state INTEGER DEFAULT 0, PRIMARY KEY (bid, chat_id))"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS devices (did TEXT PRIMARY KEY, first_at INTEGER, last_at INTEGER, pf TEXT, v TEXT, listen INTEGER DEFAULT 0, chat_id INTEGER DEFAULT 0, lday INTEGER DEFAULT 0, ltoday INTEGER DEFAULT 0, pings INTEGER DEFAULT 0)"),
     env.DB.prepare("INSERT OR IGNORE INTO people (chat_id, username, name, first_at, last_seen, blocked, connected) SELECT chat_id, MAX(username), MAX(name), MIN(COALESCE(NULLIF(linked,0), created)), MAX(COALESCE(NULLIF(linked,0), created)), 0, 1 FROM users WHERE chat_id IS NOT NULL AND chat_id > 0 GROUP BY chat_id"),
     env.DB.prepare("INSERT INTO dlog (chat_id, sid, title, artist, at) SELECT chat_id, sid, title, artist, at FROM dls WHERE NOT EXISTS (SELECT 1 FROM dlog)"),
   ]).catch(e => { dbReady = null; throw e; });
@@ -574,19 +575,85 @@ async function adminStats(d, env) {
     one("SELECT COUNT(*) AS n FROM people WHERE last_seen >= ?", t0), one("SELECT COUNT(*) AS n FROM people WHERE blocked = 1"),
     one("SELECT COUNT(*) AS n FROM dlog"), one("SELECT COUNT(*) AS n FROM dlog WHERE at >= ?", t0), one("SELECT COUNT(*) AS n FROM files")]);
   const top = ((await d.prepare("SELECT sid, MAX(title) AS title, MAX(artist) AS artist, COUNT(*) AS n FROM dlog GROUP BY sid ORDER BY n DESC, MAX(at) DESC LIMIT 10").all()).results || []);
-  return `📊 Dhun stats (${istDate(Date.now())})\n\n👥 Connected users: ${conn}${starters > conn ? ` (+${starters - conn} started bot only)` : ""}\n🆕 New today: ${newT} · last 7 days: ${new7}\n🟢 Active today: ${actT}\n🚫 Blocked the bot: ${blk}\n\n⬇️ Total downloads: ${dlAll}\n📅 Downloads today: ${dlT}\n🗂 Songs in storage group: ${cache}\n\n🏆 Top 10 songs:\n` + (top.length ? top.map((r, i) => `${i + 1}. ${r.title} – ${r.artist} (${r.n})`).join("\n") : "abhi koi download nahi") + (env ? "\n\n" + await logStatus(env) : "");
+  const us = await usageBlock(d);
+  return `📊 Dhun stats (${istDate(Date.now())})\n\n${us.text}\n\n🤖 Bot: ${starters > conn ? `${starters - conn} ne sirf bot start kiya · ` : ""}🚫 Blocked: ${blk} · Telegram naye 7 din: ${new7}\n\n⬇️ Total downloads: ${dlAll}\n📅 Downloads today: ${dlT}\n🗂 Songs in storage group: ${cache}\n\n🏆 Top 10 songs:\n` + (top.length ? top.map((r, i) => `${i + 1}. ${r.title} – ${r.artist} (${r.n})`).join("\n") : "abhi koi download nahi") + (env ? "\n\n" + await logStatus(env) : "");
 }
 async function testLog(env, from) {
   try { return await logSend(env, `🧪 <b>Test log</b> · Dhun logs channel kaam kar raha hai ✅\nAdmin: ${who(from)}\n🕒 ${istDate(Date.now())} ${hm()}`, { force: true }); }
   catch (e) { return { error: scrub(e && e.message || e) }; }
 }
-async function adminUsers(d) {
-  const rs = ((await d.prepare("SELECT p.*, (SELECT COUNT(*) FROM dlog l WHERE l.chat_id = p.chat_id) AS dl FROM people p ORDER BY p.first_at DESC LIMIT 20").all()).results || []);
-  const tot = ((await d.prepare("SELECT COUNT(*) AS n FROM people").first()) || {}).n || 0;
-  if (!rs.length) return "👥 Abhi koi user nahi hai.";
-  return `👥 Last ${rs.length} of ${tot} users (newest first)\n\n` + rs.map((r, i) => `${i + 1}. ${r.username ? "@" + r.username : ""}${r.username && r.name ? " · " : ""}${r.name || (r.username ? "" : "id " + r.chat_id)}${r.blocked ? " 🚫" : ""}${r.connected ? "" : " (bot only)"}\n    joined ${istDate(r.first_at || 0)} · ${r.dl} downloads`).join("\n");
+// ---------- v1.0.9: anonymous usage heartbeat (random install id per app/browser; no personal data, no song names) ----------
+const PG_PF = new Set(["web-iphone", "web-ipad", "web-android", "web-desktop", "android-app"]);
+const istDayN = ms => Math.floor((ms + IST) / 86400e3);
+async function pingRoute(env, req, body) {
+  if (req.method !== "POST") return J({ ok: false }, 405);
+  if (body.op && HOOK_SECRET && req.headers.get("x-dhun-dry") === HOOK_SECRET) { // maintenance (tests only): forget a test install / re-read a Telegram name
+    const d = await db(env);
+    if (body.op === "del" && /^[a-z0-9]{12,32}$/.test(String(body.did || ""))) { const r = await d.prepare("DELETE FROM devices WHERE did = ?").bind(String(body.did)).run(); return J({ ok: true, deleted: (r.meta && r.meta.changes) || 0 }); }
+    if (body.op === "name" && Number(body.chat) > 0) { const nm = await nameFetch(d, Number(body.chat)); return J({ ok: !!nm, name: nm || null }); }
+    return J({ ok: false }, 400);
+  }
+  const did = String(body.did || ""); if (!/^[a-z0-9]{12,32}$/.test(did)) return J({ ok: false, error: "bad id" }, 400);
+  const pf = PG_PF.has(body.pf) ? body.pf : "other", v = String(body.v || "").replace(/[^\w.-]/g, "").slice(0, 16);
+  let ls = Math.max(0, Math.min(3600, Math.floor(Number(body.ls) || 0)));
+  const d = await db(env), now = Date.now(), day = istDayN(now);
+  let chat = 0;
+  if (body.tg && /^[A-Za-z0-9_-]{16,64}$/.test(String(body.c || ""))) { const u = await d.prepare("SELECT chat_id FROM users WHERE code = ? AND linked > 0").bind(String(body.c)).first(); if (u && u.chat_id > 0) chat = u.chat_id; }
+  const row = await d.prepare("SELECT last_at FROM devices WHERE did = ?").bind(did).first();
+  if (!row) {
+    const ip = req.headers.get("cf-connecting-ip") || "?";
+    if (await evCount(d, "dnew:" + ip, 3600e3) >= 30) return J({ ok: false, later: 1 }); // max 30 new installs per IP per hour
+    await evAdd(d, "dnew:" + ip);
+    ls = Math.min(ls, 900);
+    await d.prepare("INSERT OR IGNORE INTO devices (did, first_at, last_at, pf, v, listen, chat_id, lday, ltoday, pings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)").bind(did, now, now, pf, v, ls, chat, day, ls).run();
+  } else {
+    const gap = (now - (row.last_at || 0)) / 1000;
+    if (gap < 5) return J({ ok: false, later: 1 }); // client keeps the seconds and sends them later
+    ls = Math.min(ls, Math.floor(gap) + 30); // can't have listened longer than the time since the last ping
+    await d.prepare("UPDATE devices SET last_at = ?, pf = ?, v = ?, listen = listen + ?, chat_id = ?, ltoday = CASE WHEN lday = ? THEN ltoday + ? ELSE ? END, lday = ?, pings = pings + 1 WHERE did = ?").bind(now, pf, v, ls, chat, day, ls, ls, day, did).run();
+  }
+  if (chat) await d.prepare("UPDATE people SET last_seen = ? WHERE chat_id = ? AND COALESCE(last_seen, 0) < ?").bind(now, chat, now).run();
+  return J({ ok: true });
 }
-const ADMIN_HELP = `🛠 Admin commands (sirf aapke liye)\n\n/admin – buttons wala admin panel\n/stats – users, downloads, top songs\n/users – last 20 users\n/broadcast <text> – sab users ko message\n   ya kisi photo/audio/video/text message ko reply karke /broadcast likho – wo message sabko copy hoga\n/confirm – pending broadcast bhejo\n/dryrun – check karo kitno ko jayega (kuch nahi bhejta)\n/cancel – pending broadcast cancel\n/testlog – logs channel me test message\n/help – ye list\n\n📝 Logs channel me sirf naye users ka log jata hai.`;
+const fmtDur = s => { s = Math.round(s || 0); if (s <= 0) return "0m"; if (s < 60) return "<1m"; const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h}h ${m}m` : `${m}m`; };
+const PF_NAME = { "web-iphone": "iPhone (web)", "web-ipad": "iPad (web)", "web-android": "Android (web)", "web-desktop": "Desktop (web)", "android-app": "Android app", other: "Other" };
+const agoTxt = ms => { if (!ms) return "—"; const s = (Date.now() - ms) / 1000; if (s < 120) return "abhi"; if (s < 3600) return Math.floor(s / 60) + "m pehle"; if (s < 86400) return Math.floor(s / 3600) + "h pehle"; if (s < 7 * 86400) return Math.floor(s / 86400) + "d pehle"; return istDate(ms); };
+async function usageBlock(d) {
+  const t0 = dayStart(), w0 = Date.now() - 7 * 86400e3, today = istDayN(Date.now());
+  const one = async (q, ...b) => ((await d.prepare(q).bind(...b).first()) || {}).n || 0;
+  const [conn, guests, aT1, aT2, a71, a72, nT1, nT2, lsAll, lsT, tgDev] = await Promise.all([
+    one("SELECT COUNT(*) AS n FROM people WHERE connected = 1"), one("SELECT COUNT(*) AS n FROM devices WHERE chat_id = 0"),
+    one("SELECT COUNT(*) AS n FROM people WHERE connected = 1 AND last_seen >= ?", t0), one("SELECT COUNT(*) AS n FROM devices WHERE chat_id = 0 AND last_at >= ?", t0),
+    one("SELECT COUNT(*) AS n FROM people WHERE connected = 1 AND last_seen >= ?", w0), one("SELECT COUNT(*) AS n FROM devices WHERE chat_id = 0 AND last_at >= ?", w0),
+    one("SELECT COUNT(*) AS n FROM people WHERE connected = 1 AND first_at >= ?", t0), one("SELECT COUNT(*) AS n FROM devices WHERE chat_id = 0 AND first_at >= ?", t0),
+    one("SELECT COALESCE(SUM(listen), 0) AS n FROM devices"), one("SELECT COALESCE(SUM(ltoday), 0) AS n FROM devices WHERE lday = ?", today),
+    one("SELECT COUNT(DISTINCT chat_id) AS n FROM devices WHERE chat_id > 0")]);
+  const pfs = ((await d.prepare("SELECT pf, COUNT(*) AS n FROM devices GROUP BY pf ORDER BY n DESC").all()).results || []);
+  return { conn, guests, text: `👥 Total users: ${conn + guests}\n   🔗 Telegram connected: ${conn}\n   👤 Bina Telegram (Guest): ${guests}\n🆕 Naye aaj: ${nT1 + nT2}\n🟢 Active aaj: ${aT1 + aT2} · 7 din: ${a71 + a72}\n📱 Platform: ${pfs.length ? pfs.map(r => `${PF_NAME[r.pf] || r.pf} ${r.n}`).join(" · ") : "abhi data nahi"}\n⏱ Total sunne ka time: ${fmtDur(lsAll)} (aaj: ${fmtDur(lsT)})\nℹ️ Time/platform v1.0.9 se count hota hai (${tgDev}/${conn} Telegram users ka data aa chuka). Android app users agle APK se.` };
+}
+const USERS_PAGE = 20;
+async function adminUsers(d, page = 1) {
+  page = Math.max(1, Math.floor(+page || 1));
+  const tot = ((await d.prepare("SELECT (SELECT COUNT(*) FROM people WHERE connected = 1) + (SELECT COUNT(*) FROM devices WHERE chat_id = 0) AS n").first()) || {}).n || 0;
+  const pages = Math.max(1, Math.ceil(tot / USERS_PAGE)); page = Math.min(page, pages);
+  const rs = ((await d.prepare(`SELECT * FROM (
+    SELECT 1 AS tg, CAST(p.chat_id AS TEXT) AS id, p.username AS username, p.name AS name, p.blocked AS blocked,
+      MIN(COALESCE(p.first_at, 9e15), COALESCE((SELECT MIN(first_at) FROM devices x WHERE x.chat_id = p.chat_id), 9e15)) AS since,
+      MAX(COALESCE(p.last_seen, 0), COALESCE((SELECT MAX(last_at) FROM devices x WHERE x.chat_id = p.chat_id), 0)) AS last,
+      (SELECT SUM(listen) FROM devices x WHERE x.chat_id = p.chat_id) AS listen,
+      (SELECT GROUP_CONCAT(DISTINCT pf) FROM devices x WHERE x.chat_id = p.chat_id) AS pf
+    FROM people p WHERE p.connected = 1
+    UNION ALL
+    SELECT 0, did, '', '', 0, first_at, last_at, listen, pf FROM devices WHERE chat_id = 0
+  ) ORDER BY last DESC LIMIT ? OFFSET ?`).bind(USERS_PAGE, (page - 1) * USERS_PAGE).all()).results || []);
+  if (!rs.length) return { text: "👥 Abhi koi user nahi hai.", page, pages };
+  const nm = r => r.tg ? `${r.name || ""}${r.username ? (r.name ? " " : "") + "@" + r.username : ""}` || "id " + r.id : `Guest #${String(r.id).slice(0, 4)}`;
+  const pf = r => r.pf ? String(r.pf).split(",").map(x => PF_NAME[x] || x).join(" + ") : "app update ka wait";
+  const text = `👥 Users (last active pehle) · page ${page}/${pages} · total ${tot}\n🔗 = Telegram · 👤 = Guest (bina Telegram)\n\n` + rs.map((r, i) => `${(page - 1) * USERS_PAGE + i + 1}. ${r.tg ? "🔗" : "👤"} ${nm(r)}${r.blocked ? " 🚫" : ""}\n    📅 since ${r.since && r.since < 9e15 ? istDate(r.since) : "—"} · 🟢 ${agoTxt(r.last)}\n    ⏱ ${r.listen == null ? "—" : fmtDur(r.listen)} · 📱 ${pf(r)}`).join("\n") + (rs.some(r => r.listen == null) ? "\n\n⏱ — = purana version, time abhi count nahi hua" : "");
+  return { text, page, pages };
+}
+const usersKb = (page, pages) => kb([...(pages > 1 ? [[...(page > 1 ? [["« Prev", "a:users:" + (page - 1)]] : []), ...(page < pages ? [["Next »", "a:users:" + (page + 1)]] : [])]] : []), [["🔄 Refresh", "a:users:" + page]], [["« Back", "a:panel"]]]);
+const ADMIN_HELP = `🛠 Admin commands (sirf aapke liye)\n\n/admin – buttons wala admin panel\n/stats – users (Telegram + Guest), active, platform, sunne ka time, downloads, top songs\n/users – sab users (Telegram + Guest): kab se, last active, kitna time · /users 2 = next page\n/broadcast <text> – sab users ko message\n   ya kisi photo/audio/video/text message ko reply karke /broadcast likho – wo message sabko copy hoga\n/confirm – pending broadcast bhejo\n/dryrun – check karo kitno ko jayega (kuch nahi bhejta)\n/cancel – pending broadcast cancel\n/testlog – logs channel me test message\n/help – ye list\n\n📝 Logs channel me sirf naye users ka log jata hai.`;
 const recipientsSQL = "SELECT chat_id FROM people WHERE blocked = 0 AND chat_id > 0";
 
 // ---------- /admin button panel (inline keyboard + callback_query) ----------
@@ -597,13 +664,14 @@ const istTime = ms => new Date(ms + IST).toISOString().slice(11, 19);
 async function panelText(d) {
   const t0 = dayStart(); const one = async (q, ...b) => ((await d.prepare(q).bind(...b).first()) || {}).n || 0;
   const [conn, actT, dlAll, dlT, newT] = await Promise.all([one("SELECT COUNT(*) AS n FROM people WHERE connected = 1"), one("SELECT COUNT(*) AS n FROM people WHERE last_seen >= ?", t0), one("SELECT COUNT(*) AS n FROM dlog"), one("SELECT COUNT(*) AS n FROM dlog WHERE at >= ?", t0), one("SELECT COUNT(*) AS n FROM people WHERE connected = 1 AND first_at >= ?", t0)]);
-  return `🛠 Dhun Admin Panel\n\n👥 Users: ${conn} (aaj naye: ${newT})\n🟢 Aaj active: ${actT}\n⬇️ Downloads: ${dlAll} (aaj: ${dlT})\n\nNeeche button dabao 👇\n🕒 Updated ${istTime(Date.now())} IST`;
+  const us = await usageBlock(d);
+  return `🛠 Dhun Admin Panel\n\n${us.text}\n⬇️ Downloads: ${dlAll} (aaj: ${dlT})\n\nNeeche button dabao 👇\n🕒 Updated ${istTime(Date.now())} IST`;
 }
 async function adminTop(d) {
   const top = ((await d.prepare("SELECT sid, MAX(title) AS title, MAX(artist) AS artist, COUNT(*) AS n FROM dlog GROUP BY sid ORDER BY n DESC, MAX(at) DESC LIMIT 15").all()).results || []);
   return "🎵 Top songs (sabse zyada download)\n\n" + (top.length ? top.map((r, i) => `${i + 1}. ${r.title} – ${r.artist} (${r.n})`).join("\n") : "Abhi koi download nahi hua.");
 }
-const ADMIN_HELP_BTN = `❓ Help\n\n📊 Stats – users, downloads, top 10\n👥 Users – last 20 users\n🎵 Top songs – sabse zyada download\n📢 Broadcast – button dabao, phir jo message bhejna hai (text/photo/audio/video) wo bhejo, preview aayega, phir ✅ Send dabao\n🔄 Refresh – numbers update\n🧪 Test log – logs channel me ek test line (naye users ka log wahan jata hai)\n\nText commands bhi chalte hain:\n/admin /stats /users /broadcast /dryrun /cancel /testlog /help`;
+const ADMIN_HELP_BTN = `❓ Help\n\n📊 Stats – total/Telegram/Guest users, active, platform, sunne ka time, downloads, top 10\n👥 Users – Telegram + Guest users: kab se, last active, kitna time sune\n🎵 Top songs – sabse zyada download\n📢 Broadcast – button dabao, phir jo message bhejna hai (text/photo/audio/video) wo bhejo, preview aayega, phir ✅ Send dabao\n🔄 Refresh – numbers update\n🧪 Test log – logs channel me ek test line (naye users ka log wahan jata hai)\n\nText commands bhi chalte hain:\n/admin /stats /users /broadcast /dryrun /cancel /testlog /help`;
 const nRecipients = async d => ((await d.prepare(`SELECT COUNT(*) AS n FROM (${recipientsSQL})`).first()) || {}).n || 0;
 const nBlocked = async d => ((await d.prepare("SELECT COUNT(*) AS n FROM people WHERE blocked = 1").first()) || {}).n || 0;
 // 'await' = waiting for the admin's next message to become the broadcast; 'pending' = waiting for Send/confirm
@@ -649,7 +717,7 @@ async function tgCallback(env, ctx, d, q, dry) {
     };
     if (data === "a:panel" || data === "a:refresh") { await edit(await panelText(d), PANEL_KB); return ans(data === "a:refresh" ? "🔄 Updated" : ""); }
     if (data === "a:stats") { await edit(await adminStats(d, env), backKb("a:stats")); return ans(""); }
-    if (data === "a:users") { await edit(await adminUsers(d), backKb("a:users")); return ans(""); }
+    const um = /^a:users(?::(\d+))?$/.exec(data); if (um) { const u = await adminUsers(d, um[1] || 1); await edit(u.text, usersKb(u.page, u.pages)); return ans(""); }
     if (data === "a:top") { await edit(await adminTop(d), backKb("a:top")); return ans(""); }
     if (data === "a:testlog") { const r = await testLog(env, from); return ans(r.message_id ? `✅ Test log bheja (msg #${r.message_id})` : `❌ Log nahi gaya: ${(r.error || "?").slice(0, 150)}`, true); }
     if (data === "a:help") { await edit(ADMIN_HELP_BTN, backKb("")); return ans(""); }
@@ -686,7 +754,7 @@ async function adminCmd(env, ctx, d, m, text, say) {
   if (cmd === "/help") return say(ADMIN_HELP);
   if (cmd === "/testlog") { const r = await testLog(env, m.from); return say(r.message_id ? `✅ Test log bheja logs channel me (msg #${r.message_id})` : `❌ Log nahi gaya: ${r.error || "?"}`); }
   if (cmd === "/stats") return say(await adminStats(d, env));
-  if (cmd === "/users") return say(await adminUsers(d));
+  if (cmd === "/users") { const u = await adminUsers(d, text.split(/\s+/)[1] || 1); return say(u.text, u.pages > 1 ? { reply_markup: usersKb(u.page, u.pages) } : undefined); }
   const nRecip = async () => ((await d.prepare(`SELECT COUNT(*) AS n FROM (${recipientsSQL})`).first()) || {}).n || 0;
   if (cmd === "/broadcast") {
     const body = text.replace(/^\/broadcast(@\w+)?/i, "").trim(); const rep = m.reply_to_message;
@@ -1553,6 +1621,7 @@ export default {
       if (p === "/api/u/hist") return await userHist(env, ctx, await impBody(req)); // per-user listening history (signed-in)
       if (p === "/api/u/taste") return await userTaste(env, ctx, await impBody(req)); // v32: onboarding picks + language (signed-in)
       if (p === "/api/artnew") { try { return await artNew(env, ctx, req.method === "POST" ? await impBody(req) : { ids: (u.searchParams.get("ids") || "").split(",") }); } catch (e) { return J({ items: [] }); } } // v32: New from your artists
+      if (p === "/api/ping") return await pingRoute(env, req, await impBody(req)); // v1.0.9: anonymous usage heartbeat
       if (p.startsWith("/api/tg/") || p.startsWith("/api/u/")) return await tgRoute(p, req, env, u, ctx);
       if (p === "/api/app-version") { // Android in-app updater; values live in /app-version.json (edit that file + swap /dhun.apk to ship a new version)
         let v = {}; try { const r = await env.ASSETS.fetch(new Request(new URL("/app-version.json", u), { headers: { "cache-control": "no-cache" } })); v = await r.json(); } catch (e) {}
