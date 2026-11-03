@@ -1,10 +1,10 @@
 {
-  "versionCode": 21,
-  "versionName": "1.0.6",
+  "versionCode": 22,
+  "versionName": "1.0.7",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "Naya welcome ✨ apni languages aur favourite artists chuno, Home unke hisaab se bane",
+  "notes": "🔍 Recent searches ab sirf search box tap karne pe dikhenge (Apple Music jaisa)",
   "force": false,
-  "size": 5029213,
-  "bytes": 5029213,
-  "sha256": "e81adc40921b256d94ee4f6c4beb5c36dbffe0b876588f8cbf0b420c04165324"
+  "size": 5031321,
+  "bytes": 5031321,
+  "sha256": "b6f89041a08445e98bdf721bd21f68f3df4131d134424ca4a4d6fd19cf412953"
 }
