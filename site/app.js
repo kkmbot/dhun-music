@@ -247,7 +247,7 @@ function renderSettings() {
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button><a class="dealRow" href="${esc(deals.join || DEALS_JOIN_DEFAULT)}" target="_blank" rel="noopener"><i class="dealEmoji">🛍️</i><span>Join Deals channel <small class="sub">Daily deals</small></span></a></div>
-  ${footHTML()}<div class="verTag">v1.0.7 · web</div>`;
+  ${footHTML()}<div class="verTag">v1.0.8 · web</div>`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -1118,7 +1118,7 @@ async function impStart(raw) {
   await Promise.all([worker(), worker(), worker()]);
   if (impJob !== job) return;
   const seen = new Set(); const out = [];
-  job.res.forEach((m, k) => { if (!m) { job.missing.push(tracks[k]); return; } if (seen.has(m.id)) return; seen.add(m.id); out.push(slim({ ...m, src: "saavn" })); });
+  job.res.forEach((m, k) => { if (!m) { job.missing.push(tracks[k]); return; } const sk = songKey(m); if (seen.has(m.id) || seen.has(sk)) { job.dup = (job.dup || 0) + 1; return; } seen.add(m.id); seen.add(sk); out.push(slim({ ...m, src: "saavn" })); }); // v32: skip duplicates (same song, any release)
   if (!out.length) { impJob = { phase: "error", url: raw, msg: "Is playlist ka koi gaana JioSaavn pe nahi mila 😕" }; return impRefresh(); }
   let name = String(pl.name || "Imported").trim().slice(0, 80) || "Imported", n = 2;
   const taken = x => playlists.some(p => (p.name || "").trim().toLowerCase() === x.toLowerCase());
@@ -1128,6 +1128,7 @@ async function impStart(raw) {
   job.phase = "done"; job.name = name; job.plId = np.id;
   if (curTab === "library" && !subView) rerender();
   if (document.getElementById("impBox") && !sheet.classList.contains("hidden")) impShow(); else toast(`✅ “${name}” ready · ${job.found}/${job.total} gaane`);
+  if (job.dup) setTimeout(() => toast(tr(`${job.dup} duplicate gaane skip kiye`), 2600), 2400); // v32
 }
 document.addEventListener("click", e => { const b = e.target.closest("[data-act=importPl]"); if (b) { e.preventDefault(); e.stopPropagation(); if (impJob && (impJob.phase === "done" || impJob.phase === "error")) impJob = null; impShow(); } }, true);
 // ---- Listening history (per user), For You, Your Recap ----
@@ -4472,4 +4473,320 @@ window.__rs = { get on() { return rsMode; }, apply: rsApply, exit: rsExit };
 try { if (curTab === "search") rsApply(); } catch (e) {}
 /* ===== end v31 recent searches ===== */
 
+/* ===== v32: taste sync · duplicate warning · typo search · New from your artists · queue swipe · decade charts · Trending in India · lyric line on the Android widget ===== */
+const V32N = typeof NATIVE !== "undefined" && !!NATIVE;
+I18N_TABLE_V32: {
+  const add = (hg, hi, en) => I18N.set(hg, [hi, en]);
+  add("Ye gaana pehle se playlist me hai", "यह गाना पहले से प्लेलिस्ट में है", "This song is already in this playlist");
+  add("Phir bhi add karo", "फिर भी जोड़ें", "Add Anyway");
+  add("Showing results for", "इसके नतीजे दिखा रहे हैं:", "Showing results for");
+  add("Aapke artists ke naye gaane", "आपके artists के नए गाने", "New from your artists");
+  add("Trending in India", "भारत में ट्रेंडिंग", "Trending in India");
+  add("Decades", "दशकों के हिट्स", "Decades");
+  add("Hata diya", "हटा दिया", "Removed");
+  add("Hatao", "हटाएँ", "Remove");
+  add("Undo", "वापस लाएँ", "Undo");
+  add("Abhi chal raha gaana nahi hata sakte", "अभी चल रहा गाना नहीं हटा सकते", "Can't remove the song that's playing");
+  add("Aapka music taste wapas aa gaya ✅", "आपकी music पसंद वापस आ गई ✅", "Your music taste is back ✅");
+  I18N_RX.push([/^(\d+) duplicate gaane skip kiye$/, "$1 डुप्लिकेट गाने छोड़े", "Skipped $1 duplicate songs"]);
+}
+
+// ---------- 1) Taste sync: onboarding picks + language follow the signed-in account (newest wins) ----------
+// Choices (onbPick, onbDone, lang) move "tasteAt"; caches (onbArtC, onbHome) ride along so Home looks the same at once.
+const TASTE_K = { onbPick: 1, onbDone: 1, lang: 1 }, TASTE_C = { onbArtC: 1, onbHome: 1 };
+let tasteAt = store.get("tasteAt", 0), tasteDirty = store.get("tasteDirty", false), tasteApplying = false, tasteT = 0, tasteLast = 0, tasteBusy = null;
+const tasteRaw = store.set;
+store.set = function (k, v) {
+  tasteRaw.call(store, k, v);
+  if (tasteApplying || !(TASTE_K[k] || TASTE_C[k])) return;
+  if (TASTE_K[k]) { tasteAt = Date.now(); tasteRaw.call(store, "tasteAt", tasteAt); }
+  tasteDirty = true; tasteRaw.call(store, "tasteDirty", true);
+  clearTimeout(tasteT); tasteT = setTimeout(() => tastePush(), 1500);
+};
+const tasteLangSet = () => { try { return localStorage.getItem("m_lang") != null; } catch (e) { return false; } };
+const tasteLocalAt = () => Math.max(tasteAt || 0, (onbPick && onbPick.at) || 0, store.get("onbDone", false) ? 1 : 0);
+function tasteLocal() {
+  const artC = store.get("onbArtC", {}), home = store.get("onbHome", null);
+  return { v: 1, at: tasteLocalAt(), pick: onbPick || null, done: !!store.get("onbDone", false), lang: tasteLangSet() ? appLang : null,
+    artC: artC && artC.__at ? artC : null, home: home && Array.isArray(home.rows) ? { sig: home.sig, day: home.day, rows: home.rows.map(r => ({ ...r, items: (r.items || []).slice(0, 15).map(slim) })) } : null };
+}
+function tasteApply(t, why) {
+  if (!t) return;
+  const hadPick = !!onbPick, pickSig = JSON.stringify(onbPick && [onbPick.langs, onbPick.artists.map(a => a.id)]);
+  tasteApplying = true;
+  try {
+    const p = t.pick && Array.isArray(t.pick.langs) && Array.isArray(t.pick.artists) ? t.pick : null;
+    onbPick = p; store.set("onbPick", p);
+    if (t.done || p) store.set("onbDone", true);
+    if (t.artC) store.set("onbArtC", t.artC);
+    onbRows = t.home && Array.isArray(t.home.rows) ? t.home : null; store.set("onbHome", onbRows);
+    if (t.lang && t.lang !== appLang && LANGS.some(l => l[0] === t.lang)) setLang(t.lang);
+    tasteAt = +t.at || Date.now(); tasteRaw.call(store, "tasteAt", tasteAt); tasteDirty = false; tasteRaw.call(store, "tasteDirty", false);
+  } finally { tasteApplying = false; }
+  if (onb.el && (t.done || t.pick)) onbClose();
+  if (JSON.stringify(onbPick && [onbPick.langs, onbPick.artists.map(a => a.id)]) !== pickSig) { fy = null; store.set("fyCache", null); setTimeout(() => { try { fyLoad(true); } catch (e) {} }, 50); }
+  if (curTab === "home" && !subView) rerender(); else if (curTab === "library" && subView === "settings") rerender();
+  if (why === "restore" && onbPick && !hadPick) toast(tr("Aapka music taste wapas aa gaya ✅"));
+}
+async function tastePush() {
+  if (!tgMe.linked || !tgCode || !tasteDirty) return;
+  const loc = tasteLocal(); if (!loc.at && !loc.done) return;
+  try {
+    tasteDirty = false; tasteRaw.call(store, "tasteDirty", false);
+    const r = await post("/api/u/taste", { op: "put", c: tgCode, t: loc });
+    if (r.status === 401) return;
+    if (!r.ok) { tasteDirty = true; tasteRaw.call(store, "tasteDirty", true); return; }
+    if (r.t && (+r.t.at || 0) > tasteLocalAt()) tasteApply(r.t, "newer");
+  } catch (e) { tasteDirty = true; tasteRaw.call(store, "tasteDirty", true); }
+}
+function tasteSync(force) {
+  if (!tgMe.linked || !tgCode) return Promise.resolve();
+  if (tasteBusy) return tasteBusy;
+  if (!force && Date.now() - tasteLast < 20000) return Promise.resolve(); tasteLast = Date.now();
+  tasteBusy = (async () => {
+    let r; try { r = await post("/api/u/taste", { op: "get", c: tgCode }); } catch (e) { return; }
+    if (!r || !r.ok) return;
+    const rem = r.t, la = tasteLocalAt(), ra = rem ? +rem.at || 0 : 0, first = !store.get("tasteSynced", false);
+    if (rem && (ra > la || (first && !onbPick && rem.pick))) {
+      if (first && rem.lang == null && tasteLangSet()) rem.lang = appLang;
+      tasteApply(rem, "restore");
+      if (first && tasteLangSet() && rem.lang !== appLang) { tasteDirty = true; }
+    } else if (!rem || la > ra || tasteDirty) { tasteDirty = true; await tastePush(); }
+    tasteRaw.call(store, "tasteSynced", true);
+  })().finally(() => { tasteBusy = null; });
+  return tasteBusy;
+}
+{ const raw = syncPull; syncPull = function () { const p = raw.apply(this, arguments); Promise.resolve(p).then(() => tasteSync()).catch(() => {}); return p; }; }
+{ const raw = tgDisconnect; tgDisconnect = function () { tasteRaw.call(store, "tasteSynced", false); tasteRaw.call(store, "tasteDirty", false); tasteDirty = false; return raw.apply(this, arguments); }; }
+setTimeout(() => { if (tgMe.linked) tasteSync(true); }, 2500);
+
+// ---------- 14) Duplicate warning when adding to a playlist (same id, or the same song under another release) ----------
+const v32Dup = (pl, t) => { const k = songKey(t); return (pl.tracks || []).some(x => x.id === t.id || songKey(x) === k); };
+function v32Alert(title, sub, okText, cancelText) {
+  return new Promise(res => {
+    const el = document.createElement("div"); el.className = "v32al"; el.setAttribute("role", "alertdialog");
+    el.innerHTML = `<div class="v32alBox"><div class="v32alT">${esc(title)}</div>${sub ? `<div class="v32alS" data-notr>${esc(sub)}</div>` : ""}<div class="v32alB"><button data-al="0">${esc(cancelText)}</button><button data-al="1" class="ok">${esc(okText)}</button></div></div>`;
+    const done = v => { el.classList.remove("in"); setTimeout(() => el.remove(), 180); res(v); };
+    el.addEventListener("click", e => { const b = e.target.closest("[data-al]"); if (b) return done(b.dataset.al === "1"); if (e.target === el) done(false); });
+    document.body.appendChild(el); requestAnimationFrame(() => el.classList.add("in"));
+  });
+}
+function v32AddTo(pl, t) { pl.tracks.push(slim(t)); store.set("playlists", playlists); toast(`Added to “${pl.name}”`); if (curTab === "library") rerender(); }
+openAddToPlaylist = function (t) {
+  if (!t || (typeof isPod === "function" && isPod(t))) return;
+  showSheet(`<div class="sgroup"><div class="shead"><div class="t1">Add to Playlist</div></div><button data-s="new">New Playlist… ${ICON.plus}</button>${playlists.map(p => `<button data-s="p" data-id="${esc(p.id)}">${esc(p.name)} <span class="sub">${p.tracks.length}</span></button>`).join("")}</div>`, {
+    new: () => { newPlaylist(t); },
+    p: b => {
+      const pl = playlists.find(p => p.id === b.dataset.id); if (!pl) return;
+      if (v32Dup(pl, t)) { setTimeout(() => v32Alert(tr("Ye gaana pehle se playlist me hai"), `“${pl.name}” · ${t.title}`, tr("Phir bhi add karo"), tr("Cancel")).then(y => { if (y) v32AddTo(pl, t); }), 80); return; }
+      v32AddTo(pl, t);
+    },
+  });
+};
+window.__v32dup = { check: v32Dup, alert: v32Alert };
+
+// ---------- 18) Typo-tolerant search: the server sends {fix} when the results spell the query differently ----------
+const v32Fix = {};
+{ const raw = api; api = function (path) { const p = raw.apply(this, arguments); if (typeof path === "string" && path.indexOf("/api/search?") === 0) Promise.resolve(p).then(d => { try { const q = new URLSearchParams(path.split("?")[1]).get("q"); v32Fix[q] = (d && d.fix) || ""; } catch (e) {} }).catch(() => {}); return p; }; }
+{ const raw = renderSearch; renderSearch = function () {
+  const r = raw.apply(this, arguments);
+  try {
+    const s = searchState, f = s.q && !s.loading && !s.typing && s.kind !== "videos" && (s.items || []).length ? v32Fix[s.q] : "";
+    const sb = $("#sbody"), old = sb && sb.querySelector(".v32fix"); if (old) old.remove();
+    if (f && sb) { const seg = sb.querySelector(".seg"); const h = `<div class="v32fix"><span>Showing results for</span> <b data-notr>${esc(f)}</b></div>`; if (seg) seg.insertAdjacentHTML("afterend", h); else sb.insertAdjacentHTML("afterbegin", h); }
+  } catch (e) {}
+  return r;
+}; }
+
+// ---------- Home rows shared ----------
+const v32Home = () => curTab === "home" && !subView;
+const v32Rm = sel => view.querySelectorAll(sel).forEach(n => n.remove());
+
+// ---------- 19) "New from your artists": followed + onboarding + most-liked artists, releases from the last 30 days ----------
+let nwData = store.get("nwCache", null), nwBusy = false, nwNames = false;
+let artIdC = store.get("artIdC", {});
+function nwLikedNames() {
+  const cnt = {}; for (const t of liked.slice(0, 200)) { const a = String(t.artist || "").split(/,|&/)[0].trim(); if (a) cnt[a] = (cnt[a] || 0) + 1; }
+  return Object.entries(cnt).sort((a, b) => b[1] - a[1]).map(x => x[0]).slice(0, 6);
+}
+function nwIds() {
+  const ids = [];
+  const push = id => { id = String(id || ""); if (/^\d{1,12}$/.test(id) && !ids.includes(id)) ids.push(id); };
+  (typeof follows !== "undefined" ? follows : []).forEach(a => push(a.id));
+  ((onbPick && onbPick.artists) || []).forEach(a => push(a.id));
+  nwLikedNames().forEach(n => push(artIdC[n]));
+  return ids.slice(0, 12);
+}
+async function nwResolve() { // liked artists' names -> JioSaavn artist ids (cached; at most 3 lookups per load)
+  const todo = nwLikedNames().filter(n => artIdC[n] === undefined).slice(0, 3); if (!todo.length) return false;
+  const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  await Promise.all(todo.map(n => api("/api/artists?q=" + encodeURIComponent(n)).then(d => { const a = ((d && d.items) || [])[0]; artIdC[n] = a && norm(a.name) === norm(n) ? String(a.id) : 0; }).catch(() => {})));
+  store.set("artIdC", artIdC); return true;
+}
+function nwLoad(force) {
+  if (nwBusy || !navigator.onLine) return;
+  const ids = nwIds(), sig = ids.join(",");
+  if (!ids.length) { if (nwData && nwData.items && nwData.items.length) { nwData = null; store.set("nwCache", null); nwPaint(); } if (!nwNames) { nwNames = true; nwResolve().then(ch => { if (ch && nwIds().length) nwLoad(true); }); } return; }
+  if (!force && nwData && nwData.sig === sig && Date.now() - nwData.at < 3 * 3600e3) return;
+  nwBusy = true;
+  post("/api/artnew", { ids }).then(d => {
+    if (d && Array.isArray(d.items)) { nwData = { sig, at: Date.now(), items: d.items.slice(0, 20) }; store.set("nwCache", nwData); if (v32Home()) nwPaint(); }
+  }).catch(() => {}).finally(() => {
+    nwBusy = false;
+    if (!nwNames) { nwNames = true; nwResolve().then(ch => { if (ch && nwIds().join(",") !== sig) nwLoad(true); }); }
+  });
+}
+function nwAgo(rd) {
+  const d = Math.max(0, Math.round((new Date(dayKey()) - new Date(String(rd).slice(0, 10))) / 864e5));
+  return d === 0 ? v25L("Today", "Aaj", "आज") : d === 1 ? v25L("Yesterday", "Kal", "कल") : v25L(d + " days ago", d + " din pehle", d + " दिन पहले");
+}
+function nwPaint() {
+  if (!v32Home()) return; v32Rm(".nwH, .nwRow");
+  const items = (nwData && nwData.items) || []; if (!items.length) return;
+  bindList("nwRel", items.map(x => x.t));
+  const h = `<h2 class="nwH">Aapke artists ke naye gaane</h2><div class="car nwRow">${items.map((x, i) => `<button class="tile" data-ctx="nwRel" data-i="${i}" data-id="${esc(x.t.id)}"><span class="nwArt"><img loading="lazy" src="${esc(x.image || x.t.thumb || "/icon-192.png")}" onerror="this.onerror=null;this.src='/icon-192.png'"><i class="nwNew">NEW</i></span><div class="t1">${esc(x.title)}</div><div class="t2">${esc(x.aname || x.t.artist || "")} · ${esc(nwAgo(x.rd))}</div></button>`).join("")}</div>`;
+  const tmp = document.createElement("div"); tmp.innerHTML = h;
+  const after = view.querySelector(".fyHome, .fy, h2");
+  if (after && after.parentNode === view) { view.insertBefore(tmp.firstChild, after); view.insertBefore(tmp.firstChild, after); }
+  else { const a = view.querySelector("[data-greet]") || view.querySelector("h1.hrow"); if (a) a.after(...tmp.childNodes); else view.append(...tmp.childNodes); }
+}
+{ const raw = relHomeRow; relHomeRow = function (root, inFollowing) { if (!inFollowing) return; return raw.apply(this, arguments); }; } // the Home copy is now "New from your artists"
+
+// ---------- 38) Trending in India: live top 10 (JioSaavn "Trending Today"), numbered, refreshed hourly ----------
+let tiData = store.get("trendIn", null), tiBusy = false;
+function tiLoad() {
+  if (tiBusy || !navigator.onLine || (tiData && Date.now() - tiData.at < 3600e3 && tiData.items.length)) return;
+  tiBusy = true;
+  api("/api/chart?l=trending&h=" + Math.floor(Date.now() / 3600e3)).then(d => {
+    const items = ((d && d.items) || []).slice(0, 10); if (!items.length) return;
+    tiData = { at: Date.now(), items }; store.set("trendIn", tiData);
+    if (d && d.items && !(colls["chart:trending"] && colls["chart:trending"].items)) colls["chart:trending"] = d;
+    if (v32Home()) tiPaint();
+  }).catch(() => {}).finally(() => { tiBusy = false; });
+}
+function tiPaint() {
+  if (!v32Home()) return; v32Rm(".tiH, .tiRow");
+  const items = (tiData && tiData.items) || []; if (!items.length) return;
+  bindList("trendIn", items);
+  const h = `<h2 class="tiH">Trending in India <a data-coll="chart:trending">See All</a></h2><div class="car tiRow">${items.map((t, i) => `<button class="tile tiT" data-ctx="trendIn" data-i="${i}" data-id="${esc(t.id)}"><span class="tiArt"><img loading="lazy" src="${esc(small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"></span><b class="tiN">${i + 1}</b><div class="tiTx"><div class="t1">${esc(t.title)}</div><div class="t2">${esc(t.artist)}</div></div></button>`).join("")}</div>`;
+  const tmp = document.createElement("div"); tmp.innerHTML = h;
+  const crd = view.querySelector(".crd:not(.decRow)"), ch = crd && crd.previousElementSibling;
+  if (ch && ch.tagName === "H2") ch.before(...tmp.childNodes);
+  else { const rp = [...view.querySelectorAll("h2")].find(x => x.nextElementSibling && x.nextElementSibling.classList.contains("car") && !x.matches(".nwH,.onbH,.onbRowH,#fyRow,.relH")); if (rp) rp.before(...tmp.childNodes); else view.append(...tmp.childNodes); }
+}
+
+// ---------- 37) Decade charts: 80s / 90s / 2000s / 2010s Hindi hits (JioSaavn editorial playlists), same cards as Top Charts ----------
+const DEC_TILES = [["80s", "80s Hits", "#c79a2b,#4d3500"], ["90s", "90s Hits", "#e84393,#5a0f35"], ["2000s", "2000s Hits", "#6c5ce7,#221a5c"], ["2010s", "2010s Hits", "#00b894,#004d3d"]];
+{ const raw = collTitle; collTitle = function (key) { const dt = DEC_TILES.find(x => "chart:" + x[0] === key); return dt ? "🕰️ " + dt[1] : raw.apply(this, arguments); }; }
+let decBusy = false;
+function decHTML() {
+  return `<h2 class="decH">🕰️ Decades</h2><div class="car crd crdRowA decRow">${DEC_TILES.map(([k, n, g]) => { const [a, b] = g.split(","), key = "chart:" + k; return `<button class="tile cTile crdA" data-coll="${key}" style="--a:${a};--b:${b}"><span class="crdArt"><img data-dec="${key}" class="crdCov" alt="" loading="lazy" decoding="async"><span class="crdOv"></span><span class="crdTop">${k.toUpperCase()}</span><b class="crdBig">${esc(n)}</b></span><div class="crdCap" data-notr>${esc(k)} Bollywood</div></button>`; }).join("")}</div>`;
+}
+function decPaint(root) {
+  (root || view).querySelectorAll("img[data-dec]").forEach(im => { const a = crdArt[im.dataset.dec]; const u = a && a.t && a.t[0]; if (u && !im.getAttribute("src")) { im.onload = () => im.classList.add("on"); im.src = crdSz(u, 500); } });
+}
+async function decLoad() {
+  if (decBusy) return; decBusy = true;
+  try {
+    const now = Date.now(), need = DEC_TILES.map(x => "chart:" + x[0]).filter(k => !crdArt[k] || now - crdArt[k].at > 864e5);
+    await Promise.all(need.map(async k => { try { const d = await api(collURL(k)); const t = []; for (const s of (d && d.items) || []) { if (s.thumb && !t.includes(s.thumb)) t.push(s.thumb); if (t.length >= 4) break; } if (t.length) crdArt[k] = { t, n: d.items.length, at: now }; if (d && d.items && d.items.length && !(colls[k] && colls[k].items)) colls[k] = d; } catch (e) {} }));
+    if (need.length) store.set("crdArt", crdArt);
+    decPaint();
+  } finally { decBusy = false; }
+}
+function decHome() {
+  if (!v32Home() || view.querySelector(".decRow")) return;
+  const crd = view.querySelector(".crd"); if (!crd) return;
+  const tmp = document.createElement("div"); tmp.innerHTML = decHTML(); crd.after(...tmp.childNodes); decPaint(); decLoad();
+}
+{ const raw = renderSearch; renderSearch = function () {
+  const r = raw.apply(this, arguments);
+  try { const sb = $("#sbody"), ch = sb && sb.querySelector(".chips"); if (ch && !sb.querySelector(".decRow") && !searchState.q) { const tmp = document.createElement("div"); tmp.innerHTML = decHTML(); ch.after(...tmp.childNodes); decPaint(sb); decLoad(); } } catch (e) {}
+  return r;
+}; }
+
+{ const raw = renderHome; renderHome = function () {
+  const r = raw.apply(this, arguments);
+  try { if (v32Home()) { decHome(); tiPaint(); nwPaint(); tiLoad(); nwLoad(); } } catch (e) { console.warn("v32 home", e); }
+  return r;
+}; }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { tiLoad(); nwLoad(); } });
+
+// ---------- 23) Queue: swipe left → red "Remove" (iOS style), full swipe removes, Undo toast ----------
+(() => {
+  const list = $("#queueList"), panel = $("#queuePanel"); if (!list || !panel) return;
+  const W = 92; let s = null, open = null, supT = 0, undo = null, undoT = 0;
+  const jam = () => typeof jamOn === "function" && jamOn();
+  const btnOf = row => { let b = row.querySelector(":scope > .v32rm"); if (!b) { row.insertAdjacentHTML("beforeend", `<button class="v32rm" data-v32rm aria-label="Remove"><span>Hatao</span></button>`); b = row.querySelector(":scope > .v32rm"); } return b; };
+  const setX = (row, x, anim) => { row.style.transition = anim ? "transform .25s cubic-bezier(.2,.8,.2,1)" : "none"; row.style.transform = x ? `translateX(${x}px)` : ""; const b = row.querySelector(":scope > .v32rm"); if (b) { b.style.transition = anim ? "width .25s cubic-bezier(.2,.8,.2,1)" : "none"; b.style.width = Math.max(W, -x) + "px"; } };
+  const close = row => { if (!row) return; setX(row, 0, true); row.classList.remove("v32open"); if (open === row) open = null; };
+  function showUndo(t, off) {
+    let el = document.getElementById("v32undo");
+    if (!el) { el = document.createElement("div"); el.id = "v32undo"; el.className = "v32undo"; document.body.appendChild(el); el.addEventListener("click", e => { if (!e.target.closest("button") || !undo) return; const u = undo; undo = null; el.classList.remove("show"); const at = Math.max(qi + 1, Math.min(queue.length, qi + u.off)); queue.splice(at, 0, u.t); saveQ(); renderQueue(); try { prepNext(); } catch (e2) {} }); }
+    undo = { t, off }; el.innerHTML = `<span data-notr>${esc(tr(`“${t.title}” queue se hataya`))}</span><button>${esc(tr("Undo"))}</button>`;
+    el.classList.add("show"); clearTimeout(undoT); undoT = setTimeout(() => { el.classList.remove("show"); undo = null; }, 4500);
+  }
+  function removeRow(row, anim) {
+    const i = +row.dataset.i; if (!(i >= 0)) return;
+    if (i === qi) { close(row); toast(tr("Abhi chal raha gaana nahi hata sakte")); return; }
+    const t = queue[i]; if (!t) return;
+    const go = () => { open = null; queue.splice(i, 1); saveQ(); renderQueue(); try { prepNext(); } catch (e) {} showUndo(t, i - qi); };
+    if (anim) { row.style.transition = "transform .22s ease-in, opacity .22s"; row.style.transform = "translateX(-110%)"; row.style.opacity = "0"; setTimeout(go, 200); } else go();
+  }
+  panel.addEventListener("touchstart", e => {
+    if (jam() || e.touches.length > 1) { s = null; return; }
+    const row = e.target.closest("#queueList .row[data-ctx=queue]");
+    if (open && (!row || row !== open) && !e.target.closest(".v32rm")) close(open);
+    if (!row || e.target.closest(".qh") || e.target.closest(".v32rm")) { s = null; return; }
+    const p = e.touches[0]; s = { row, x: p.clientX, y: p.clientY, base: row === open ? -W : 0, mode: null, cur: row === open ? -W : 0 };
+  }, { capture: true, passive: true });
+  panel.addEventListener("touchmove", e => {
+    if (!s) return; const p = e.touches[0], dx = p.clientX - s.x, dy = p.clientY - s.y;
+    if (!s.mode) { if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2) { s.mode = "sw"; btnOf(s.row); s.row.classList.add("v32sw"); } else if (Math.abs(dy) > 8) { s = null; return; } else return; }
+    e.preventDefault(); e.stopPropagation();
+    let x = s.base + dx; if (x > 0) x = x / 4; s.cur = x; setX(s.row, x, false);
+    s.row.classList.toggle("v32full", -x > s.row.offsetWidth * 0.55);
+  }, { capture: true, passive: false });
+  const end = e => {
+    if (!s) return; const st = s; s = null; if (st.mode !== "sw") return;
+    e.stopPropagation(); supT = Date.now(); st.row.classList.remove("v32full");
+    if (-st.cur > st.row.offsetWidth * 0.55) removeRow(st.row, true);
+    else if (-st.cur > W * 0.45) { setX(st.row, -W, true); st.row.classList.add("v32open"); open = st.row; }
+    else close(st.row);
+  };
+  panel.addEventListener("touchend", end, { capture: true, passive: true }); panel.addEventListener("touchcancel", end, { capture: true, passive: true });
+  panel.addEventListener("click", e => {
+    const rb = e.target.closest(".v32rm"); if (rb) { e.stopPropagation(); e.preventDefault(); const row = rb.closest(".row"); if (row) removeRow(row, true); return; }
+    if (Date.now() - supT < 450) { e.stopPropagation(); e.preventDefault(); return; }
+    if (open && e.target.closest("#queueList")) { e.stopPropagation(); e.preventDefault(); close(open); }
+  }, true);
+  window.__v32q = { remove: i => { const row = list.querySelector(`.row[data-i="${i}"]`); if (row) removeRow(row, false); }, undoState: () => undo };
+})();
+
+// ---------- 10) Android: the sung lyric line on the home-screen widget + media notification (falls back to the artist) ----------
+if (V32N) {
+  let lwFor = "", lwIdx = -2, lwFetch = "";
+  const lwSend = x => { try { if (window.DhunNative && window.DhunNative.lyric) window.DhunNative.lyric(x || ""); } catch (e) {} };
+  const lwData = t => {
+    const c = lyrCache.get(t.id); if (c && !c.loading) return c;
+    if (lwFetch === t.id || c) return null; lwFetch = t.id;
+    const q = `/api/lyrics?id=${encodeURIComponent(t.src === "saavn" ? t.id : "")}&title=${encodeURIComponent(t.title || "")}&artist=${encodeURIComponent(t.artist || "")}&dur=${Math.round(t.dur || P.dur() || 0)}`;
+    api(q).then(d => { if (lyrCache.get(t.id)) return; const syn = parseLRC(d && d.synced); lyrCache.set(t.id, syn.length > 2 ? { synced: syn, plain: d.plain || "" } : d && d.plain ? { plain: String(d.plain) } : { none: 1, err: d && d.error ? 1 : 0 }); }).catch(() => {});
+    return null;
+  };
+  const lwTick = () => {
+    const t = queue[qi]; if (!t) return;
+    if (t.id !== lwFor) { lwFor = t.id; lwIdx = -2; lwSend(""); }
+    if (!P.playing()) return;
+    const c = lwData(t); if (!c || !c.synced) return;
+    const now = P.time() + 0.2; let i = -1; for (let k = 0; k < c.synced.length; k++) { if (c.synced[k].t <= now) i = k; else break; }
+    if (i === lwIdx) return; lwIdx = i;
+    lwSend(i >= 0 ? c.synced[i].x : "");
+  };
+  document.addEventListener("timeupdate", lwTick, true); setInterval(lwTick, 1000);
+  window.__v32lw = { tick: lwTick, state: () => ({ lwFor, lwIdx }) };
+}
+window.__v32 = { taste: { local: tasteLocal, sync: tasteSync, push: tastePush, apply: tasteApply, at: tasteLocalAt }, fix: v32Fix, nw: () => nwData, nwLoad, ti: () => tiData, tiLoad, dec: DEC_TILES };
+window.__v32t = { collOpen: k => collOpen(k), openNP: () => openNP(), closeNP: () => closeNP(), addPl: t => openAddToPlaylist(t), q: () => queue, qi: () => qi, pls: () => playlists, newPl: (id, name) => { playlists.unshift({ id, name, tracks: [] }); store.set("playlists", playlists); }, slim: t => slim(t), setLang: l => setLang(l), go: (t, s) => go(t, s) };
+/* ===== end v32 ===== */
 })();

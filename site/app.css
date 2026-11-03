@@ -1036,3 +1036,33 @@ h2.onbRowH>a{flex:0 0 auto}
 #rsv .rsvGo span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #rsv .rsvX{flex:none;width:44px;height:44px;margin-right:-10px;background:none;border:0;color:rgba(255,255,255,.45);font-size:15px;padding:0;font-family:inherit}
 /* ===== end v31 ===== */
+
+/* ===== v32: duplicate alert · typo note · New from your artists · Trending in India · queue swipe ===== */
+.v32al{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0);transition:background .18s;padding:24px}
+.v32al.in{background:rgba(0,0,0,.42)}
+.v32alBox{width:300px;max-width:100%;border-radius:14px;overflow:hidden;background:rgba(44,44,46,.96);-webkit-backdrop-filter:blur(30px) saturate(1.6);backdrop-filter:blur(30px) saturate(1.6);text-align:center;transform:scale(1.12);opacity:0;transition:transform .2s cubic-bezier(.2,.9,.3,1.2),opacity .18s;box-shadow:0 12px 40px rgba(0,0,0,.45)}
+.v32al.in .v32alBox{transform:none;opacity:1}
+.v32alT{font-size:17px;font-weight:600;padding:19px 16px 2px;line-height:1.3;color:#fff}
+.v32alS{font-size:13px;color:rgba(235,235,245,.62);padding:4px 16px 18px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.v32alB{display:flex;border-top:.5px solid rgba(255,255,255,.16)}
+.v32alB button{flex:1;padding:12px 6px;font-size:16px;color:#0a84ff;font-family:inherit;line-height:1.2}
+.v32alB button+button{border-left:.5px solid rgba(255,255,255,.16)}
+.v32alB button.ok{font-weight:600}
+.v32alB button:active{background:rgba(255,255,255,.1)}
+.v32fix{padding:2px 20px 10px;font-size:14px;color:var(--sub)}
+.v32fix b{color:var(--accent,#fa2d48);font-weight:700}
+.nwArt{position:relative;display:block}
+.nwNew{position:absolute;top:8px;left:8px;background:#fa2d48;color:#fff;font-style:normal;font-size:10px;font-weight:800;letter-spacing:.04em;padding:3px 7px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.tiT{position:relative}
+.tiArt{display:block;position:relative}
+.tiArt::after{content:"";position:absolute;inset:0;border-radius:10px;background:linear-gradient(200deg,rgba(0,0,0,0) 45%,rgba(0,0,0,.55))}
+.tiN{position:absolute;left:8px;top:96px;font-size:50px;line-height:1;font-weight:900;color:#fff;letter-spacing:-.04em;text-shadow:0 2px 12px rgba(0,0,0,.5);pointer-events:none;font-style:italic}
+#queueList{overflow-x:hidden}
+#queueList .row.v32sw,#queueList .row.v32open{position:relative;z-index:1}
+.v32rm{position:absolute;top:0;bottom:0;left:100%;width:92px;background:#ff3b30;color:#fff;display:flex;align-items:center;justify-content:flex-start;font-size:15px;font-weight:600;font-family:inherit;padding:0;border-radius:0}
+.v32rm span{display:block;width:92px;text-align:center}
+.row.v32full .v32rm span{text-align:left;padding-left:18px}
+.v32undo{position:fixed;left:50%;bottom:calc(var(--sb,0px) + 28px);transform:translate(-50%,24px);opacity:0;pointer-events:none;z-index:9400;display:flex;align-items:center;gap:14px;max-width:min(92vw,420px);padding:10px 10px 10px 16px;border-radius:16px;background:rgba(50,50,52,.96);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);box-shadow:0 8px 30px rgba(0,0,0,.4);transition:transform .25s,opacity .25s;font-size:14px}
+.v32undo.show{transform:translate(-50%,0);opacity:1;pointer-events:auto}
+.v32undo span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v32undo button{flex:none;color:var(--accent,#fa2d48);font-weight:700;font-size:15px;padding:6px 10px;font-family:inherit}

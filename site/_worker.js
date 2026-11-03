@@ -251,7 +251,7 @@ async function svAlbum(id, songId) {
   if (o.items.length) memSet(k, o, 6 * 3600); return o;
 }
 // A JioSaavn playlist as a play-all list (charts): one copy of each song, up to 100
-const CHARTS = { hindi: ["1134543272", "Hindi: India Superhits Top 50"], punjabi: ["1134543511", "Punjabi: India Superhits Top 50"], english: ["1134595537", "International : India Superhits Top 50"], bhojpuri: ["1134768973", "Bhojpuri: India Superhits Top 50"], haryanvi: ["1134770917", "Haryanvi: India Superhits Top 50"], trending: ["110858205", "Trending Today"] };
+const CHARTS = { hindi: ["1134543272", "Hindi: India Superhits Top 50"], punjabi: ["1134543511", "Punjabi: India Superhits Top 50"], english: ["1134595537", "International : India Superhits Top 50"], bhojpuri: ["1134768973", "Bhojpuri: India Superhits Top 50"], haryanvi: ["1134770917", "Haryanvi: India Superhits Top 50"], trending: ["110858205", "Trending Today"], "80s": ["824691088", "Best Of 80s - Hindi", "best of 80s hindi"], "90s": ["1069828550", "90s Hits - Hindi", "90s hits hindi"], "2000s": ["1167751270", "Hindi 2000s", "hindi 2000s"], "2010s": ["1164340768", "Best Of 2010s - Hindi", "best of 2010s hindi"] }; // v32: decade charts
 const dedupeSongs = (l, max) => { const ids = new Set(), keys = new Set(), out = []; for (const t of l) { if (!t || ids.has(t.id)) continue; ids.add(t.id); const sk = songKey(t); if (keys.has(sk)) continue; keys.add(sk); out.push(t); if (out.length >= max) break; } return out; };
 async function svPlFull(id, n = 100) {
   const d = await sv("playlist.getDetails", { listid: id, n: String(n), p: "1" });
@@ -261,7 +261,7 @@ async function svChart(lang) {
   const c = CHARTS[lang]; if (!c) throw new Error("no chart");
   const k = "chart:" + lang; const h = memGet(k); if (h) return h;
   let o = null; try { o = await svPlFull(c[0], 100); } catch (e) {}
-  if (!o || o.items.length < 10) { const pr = await sv("search.getPlaylistResults", { q: lang + " top 50", n: "3", p: "1" }); const pl = (pr.results || [])[0]; if (pl) o = await svPlFull(pl.id, 100); }
+  if (!o || o.items.length < 10) { const pr = await sv("search.getPlaylistResults", { q: c[2] || lang + " top 50", n: "3", p: "1" }); const pl = (pr.results || [])[0]; if (pl) o = await svPlFull(pl.id, 100); }
   if (!o || !o.items.length) throw new Error("empty chart");
   o = { ...o, kind: "chart" }; memSet(k, o, 3 * 3600); return o;
 }
@@ -1541,6 +1541,8 @@ export default {
       if (p.startsWith("/api/jam/")) return await jamRoute(p, req, env, u); // Listen Together
       if (p.startsWith("/api/pod/")) return await podRoute(p, req, u); // 🎙️ Podcasts
       if (p === "/api/u/hist") return await userHist(env, ctx, await impBody(req)); // per-user listening history (signed-in)
+      if (p === "/api/u/taste") return await userTaste(env, ctx, await impBody(req)); // v32: onboarding picks + language (signed-in)
+      if (p === "/api/artnew") { try { return await artNew(env, ctx, req.method === "POST" ? await impBody(req) : { ids: (u.searchParams.get("ids") || "").split(",") }); } catch (e) { return J({ items: [] }); } } // v32: New from your artists
       if (p.startsWith("/api/tg/") || p.startsWith("/api/u/")) return await tgRoute(p, req, env, u, ctx);
       if (p === "/api/app-version") { // Android in-app updater; values live in /app-version.json (edit that file + swap /dhun.apk to ship a new version)
         let v = {}; try { const r = await env.ASSETS.fetch(new Request(new URL("/app-version.json", u), { headers: { "cache-control": "no-cache" } })); v = await r.json(); } catch (e) {}
@@ -1574,9 +1576,9 @@ export default {
         if (!q) return J({ items: [] });
         const kind = u.searchParams.get("kind") || "songs";
         let items = [], via = "saavn";
-        if (kind !== "videos") { try { items = await svSearch(q); } catch (e) {} }
+        let fix = ""; if (kind !== "videos") { try { const r = await svSearchFix(q); items = r.items; fix = r.fix; } catch (e) {} }
         if (!items.length) { via = "youtube"; try { items = await searchYTM(q, kind); } catch (e) {} if (!items.length) { try { items = await searchFallback(q); } catch (e) {} } items = items.map(x => ({ ...x, src: "yt" })); }
-        return J({ items, via }, 200, items.length ? 600 : 0);
+        return J(fix && via === "saavn" ? { items, via, fix } : { items, via }, 200, items.length ? 600 : 0);
       }
       if (p === "/api/match") { // best JioSaavn track for a title (old YouTube library entries, YT-only results)
         let t = null; try { t = (await svSearch(q, 5))[0] || null; } catch (e) {}
@@ -1619,3 +1621,96 @@ export default {
     return env.ASSETS.fetch(req);
   }
 };
+
+// ===== v32: taste sync, typo-tolerant search, new releases of your artists (last 30 days) =====
+// Taste (onboarding picks + language) per signed-in user, D1 kv "ut:<chat_id>"; newest "at" wins.
+async function userTaste(env, ctx, body) {
+  const d = await db(env); const u = await userOf(d, body.c, ctx);
+  if (!u || !u.chat_id || !u.linked) return J({ error: "not_linked" }, 401);
+  const k = "ut:" + u.chat_id; let cur = null;
+  try { const v = await kvGet(d, k); if (v) cur = JSON.parse(v); } catch (e) {}
+  if (body.op === "put" && body.t && typeof body.t === "object") {
+    const t = body.t, j = JSON.stringify(t);
+    if (j.length > 80000) return J({ error: "too big" }, 413);
+    if (!cur || (+t.at || 0) >= (+cur.at || 0)) { cur = t; await kvSet(d, k, j); }
+  }
+  return J({ ok: true, t: cur });
+}
+// Typo-tolerant search: JioSaavn already forgives most spellings; we (1) say "Showing results for X" when the top results
+// spell the query differently, (2) when the answer is thin, also try spelling variants + JioSaavn autocomplete (parallel, cached).
+const fxNorm = s => String(s || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+const fxSkel = s => fxNorm(s).replace(/ph/g, "f").replace(/w/g, "v").replace(/z/g, "j").replace(/sh/g, "s").replace(/([bcdgjkpt])h/g, "$1").replace(/h\b/g, "").replace(/ee/g, "i").replace(/oo/g, "u").replace(/(.)\1+/g, "$1").replace(/y/g, "i").replace(/(.)\1+/g, "$1");
+const fxCons = s => fxSkel(s).replace(/\B[aeiou]+/g, "");
+function fxLev(a, b) { if (a === b) return 0; const m = a.length, n = b.length; if (!m || !n) return m || n; let p = Array.from({ length: n + 1 }, (_, i) => i); for (let i = 1; i <= m; i++) { const c = [i]; for (let j = 1; j <= n; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[n]; }
+const fxSim = (a, b) => 1 - fxLev(a, b) / Math.max(a.length, b.length, 1);
+const fxTitle = s => String(s || "").replace(/\s*[\(\[][^\)\]]*[\)\]]/g, " ").split(/\s+[-\u2013\u2014|]\s+/)[0].replace(/\s+/g, " ").trim();
+function fxCands(items) { const out = []; for (const t of (items || []).slice(0, 6)) { out.push(fxTitle(t.title)); for (const a of String(t.artist || "").split(/,|&/)) if (a.trim()) out.push(a.trim()); if (t.album) out.push(fxTitle(t.album)); } return out.filter(Boolean); }
+// -> {fix, score}: fix = the spelling the results use ("" when the query already matches one exactly / nothing is close)
+function fxPick(q, items) {
+  const nq = fxNorm(q); if (nq.length < 3) return { fix: "", score: 1 };
+  const qw = nq.split(" ").length, cq = fxCons(nq), sq = fxSkel(nq); let best = null, any = 0;
+  for (const c of fxCands(items)) {
+    const nc = fxNorm(c); if (!nc) continue;
+    if (nc === nq) return { fix: "", score: 1 };
+    any = Math.max(any, fxSim(sq, fxSkel(nc)), nc.includes(nq) || nq.includes(nc) ? 0.9 : 0);
+    if (nc.split(" ").length !== qw) continue;
+    const s = fxCons(nc) === cq ? 1 : fxSim(sq, fxSkel(nc));
+    if (s >= 0.75 && fxSim(nq, nc) >= 0.6 && (!best || s > best.s)) best = { c, s };
+  }
+  return best ? { fix: best.c, score: best.s } : { fix: "", score: any };
+}
+function fxVariants(q) {
+  const n = fxNorm(q), v = new Set();
+  v.add(n.replace(/aa/g, "a").replace(/ee/g, "i").replace(/oo/g, "u").replace(/(.)\1+/g, "$1"));
+  v.add(n.replace(/([bcdgjkpt])h/g, "$1").replace(/sh/g, "s").replace(/w/g, "v").replace(/z/g, "j").replace(/ph/g, "f"));
+  v.add(n.replace(/([^aeiou\s])([aeiou])([^aeiou\s])(?=[aeiou])/g, "$1$2$2$3"));
+  v.delete(n); v.delete(""); return [...v].slice(0, 2);
+}
+async function svSearchFix(q) {
+  const mk = "fx:" + fxNorm(q); const hit = memGet(mk); if (hit) return hit;
+  let items = []; try { items = await svSearch(q); } catch (e) {}
+  let pk = fxPick(q, items), out = { items, fix: pk.fix };
+  if (fxNorm(q).length >= 4 && (items.length < 8 || (!pk.fix && pk.score < 0.6))) {
+    const alt = new Set(fxVariants(q));
+    try { const ac = await sv("autocomplete.get", { query: q }); for (const g of ["topquery", "songs", "artists", "albums"]) { const x = ac && ac[g] && ac[g].data && ac[g].data[0]; if (x && x.title) { alt.add(fxTitle(ent(x.title))); if (alt.size >= 4) break; } } } catch (e) {}
+    alt.delete(fxNorm(q));
+    const tries = await Promise.all([...alt].slice(0, 3).map(v => svSearch(v, 30).then(it => ({ v, it, p: fxPick(v, it), s: fxPick(q, it) })).catch(() => null)));
+    let bestT = null; for (const t of tries) if (t && t.it.length) { const sc = (t.s.fix ? t.s.score : t.s.score * 0.8) + Math.min(t.it.length, 20) / 100; if (!bestT || sc > bestT.sc) bestT = { ...t, sc }; }
+    const baseSc = (pk.fix ? pk.score : pk.score * 0.8) + Math.min(items.length, 20) / 100;
+    if (bestT && bestT.sc > baseSc + 0.05) {
+      const seen = new Set(), merged = [];
+      for (const t of [...bestT.it, ...items]) if (t && !seen.has(t.id)) { seen.add(t.id); merged.push(t); }
+      const f = bestT.s.fix || fxPick(bestT.v, bestT.it).fix || (fxCands(bestT.it)[0] && fxSim(fxSkel(q), fxSkel(fxCands(bestT.it)[0])) >= 0.6 ? fxCands(bestT.it)[0] : "");
+      out = { items: merged.slice(0, 40), fix: f && fxNorm(f) !== fxNorm(q) ? f : "" };
+    }
+  }
+  if (out.items.length) memSet(mk, out, 3600);
+  return out;
+}
+// "New from your artists": releases (albums / singles) of the given artists from the last 30 days, newest first.
+// Per artist state in D1 kv "anr:<aid>" (refreshed at most every 3 h, shared by everyone).
+async function artNew(env, ctx, body) {
+  const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(String).filter(x => /^\d{1,12}$/.test(x)))].slice(0, 12);
+  if (!ids.length) return J({ items: [] });
+  const d = await db(env); const now = Date.now(), out = [], cy = new Date().getFullYear(); let budget = 8;
+  const one = async aid => {
+    const k = "anr:" + aid; let st = null; try { const v = await kvGet(d, k); if (v) st = JSON.parse(v); } catch (e) {}
+    if ((!st || now - st.at > 3 * 3600e3) && budget-- > 0) {
+      try {
+        const r = await artistReleases(aid);
+        const cand = r.rel.filter(x => +x.year >= cy - 1 && !/vocals only|instrumental|karaoke|slowed|reverb|lo-?fi|sped up|\b8d\b/i.test(x.title)).slice(0, 4);
+        const rel = [];
+        await Promise.all(cand.map(async x => { try { const a = await sv("content.getAlbumDetails", { albumid: x.id }); const l = a.list || []; const songs = svList(l); const rd = (l[0] && l[0].more_info && l[0].more_info.release_date) || ""; if (songs.length && rd) rel.push({ id: x.id, title: x.title, image: x.image, rd, n: songs.length, t: songs[0] }); } catch (e) {} }));
+        st = { at: now, name: r.name, image: r.image, rel };
+        await kvSet(d, k, JSON.stringify(st));
+      } catch (e) { if (!st) return; }
+    }
+    if (st) for (const x of st.rel || []) out.push({ ...x, aid, aname: st.name });
+  };
+  for (let i = 0; i < ids.length; i += 4) await Promise.all(ids.slice(i, i + 4).map(one));
+  const cut = now - 30 * 864e5, seen = new Set(), keys = new Set();
+  const items = out.filter(x => { const t = Date.parse(x.rd); return t >= cut && t <= now + 2 * 864e5; })
+    .sort((a, b) => (Date.parse(b.rd) - Date.parse(a.rd)) || (+b.id - +a.id))
+    .filter(x => { const sk = songKey(x.t); if (seen.has(x.id) || keys.has(sk)) return false; seen.add(x.id); keys.add(sk); return true; });
+  return J({ items: items.slice(0, 20) });
+}

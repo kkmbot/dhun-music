@@ -48,6 +48,7 @@
     //     the widget's prev / play-pause / next to the same handlers the lock screen uses.
     var DW = P.DhunWidget;
     var wTitle = "", wArtist = "";
+    var lyr = ""; // v32: the lyric line being sung right now ("" = show the artist), set by app.js through DhunNative.lyric()
     // ~256px JPEG data URL for the widget. Remote https art is passed as the URL (native downloads it,
     // avoids canvas CORS); blob:/same-origin art is drawn to a canvas here.
     var widgetArt = function (src) {
@@ -75,10 +76,10 @@
       sized.sort(function (x, y) { return x.n - y.n; }).forEach(function (x) { if (!pick && x.n >= 200) pick = x.a; });
       if (!pick) pick = art[art.length - 1];
       var my = metaSeq;
-      quiet(DW.update({ title: wTitle, artist: wArtist, playing: state === "playing" })); // text now
-      widgetArt(pick && pick.src).then(function (src) { if (my === metaSeq) quiet(DW.update({ title: wTitle, artist: wArtist, playing: state === "playing", art: src || "" })); });
+      quiet(DW.update({ title: wTitle, artist: lyr || wArtist, playing: state === "playing" })); // text now
+      widgetArt(pick && pick.src).then(function (src) { if (my === metaSeq) quiet(DW.update({ title: wTitle, artist: lyr || wArtist, playing: state === "playing", art: src || "" })); });
     };
-    var widgetState = function () { if (DW && wTitle) quiet(DW.update({ title: wTitle, artist: wArtist, playing: state === "playing" })); };
+    var widgetState = function () { if (DW && wTitle) quiet(DW.update({ title: wTitle, artist: lyr || wArtist, playing: state === "playing" })); };
     var widgetDo = function (a) {
       var f = a === "prev" ? handlers.previoustrack : a === "next" ? handlers.nexttrack : a === "toggle" ? (state === "playing" ? handlers.pause : handlers.play) : null;
       if (f) { try { f({ action: a }); } catch (e) {} } else widgetState(); // nothing to do → put the real icon back
@@ -95,11 +96,11 @@
     var shim = {
       get metadata() { return meta; },
       set metadata(m) {
-        meta = m; if (!m) return; var my = ++metaSeq;
+        meta = m; lyr = ""; if (!m) return; var my = ++metaSeq;
         var art = Array.prototype.slice.call(m.artwork || []); var best = art[art.length - 1];
         var base = { title: m.title || "", artist: m.artist || "", album: m.album || "" };
         quiet(MS.setMetadata(Object.assign({ artwork: [] }, base)));
-        if (best && best.src) toData(best.src).then(function (src) { if (my === metaSeq && src) quiet(MS.setMetadata(Object.assign({ artwork: [{ src: src, sizes: best.sizes || "512x512", type: best.type || "image/jpeg" }] }, base))); });
+        if (best && best.src) toData(best.src).then(function (src) { if (my === metaSeq && src) quiet(MS.setMetadata(Object.assign({ artwork: [{ src: src, sizes: best.sizes || "512x512", type: best.type || "image/jpeg" }] }, base, { artist: lyr || base.artist }))); });
         try { widgetMeta(m, art); } catch (e) {}
       },
       get playbackState() { return state; },
@@ -115,6 +116,15 @@
       }
     };
     try { Object.defineProperty(navigator, "mediaSession", { value: shim, configurable: true }); } catch (e) {}
+    // v32: lyric line → widget subtitle + notification / lock-screen text (no artwork in the call: the plugin keeps the current
+    // picture and the play/pause/next controls are untouched). app.js calls this once per line change; "" = back to the artist.
+    window.__dhunLyric = function (line) {
+      line = String(line || "").replace(/\s+/g, " ").trim().slice(0, 140);
+      if (line === lyr || !meta) return; lyr = line;
+      var a = lyr || meta.artist || "";
+      quiet(MS.setMetadata({ title: meta.title || "", artist: a, album: meta.album || "" }));
+      if (DW && wTitle) quiet(DW.update({ title: wTitle, artist: lyr || wArtist, playing: state === "playing" }));
+    };
     if (typeof window.MediaMetadata !== "function") window.MediaMetadata = function (o) { o = o || {}; this.title = o.title; this.artist = o.artist; this.album = o.album; this.artwork = o.artwork || []; };
   }
 
@@ -129,6 +139,7 @@
       available: function () { return SP ? SP.available().then(function (r) { return !!(r && r.ok); }).catch(function () { return false; }) : Promise.resolve(false); },
       listen: function (lang, prompt) { return SP.listen({ lang: lang || "hi-IN", prompt: prompt || "" }).then(function (r) { return (r && r.text) || ""; }); }
     },
+    lyric: function (line) { if (window.__dhunLyric) window.__dhunLyric(line); },
     shareImage: function (src, text) {
       if (!SH) return Promise.reject(new Error("share unavailable"));
       var p = typeof src === "string" ? Promise.resolve(src)
