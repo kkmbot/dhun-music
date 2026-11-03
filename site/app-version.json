@@ -1,10 +1,10 @@
 {
-  "versionCode": 22,
-  "versionName": "1.0.7",
+  "versionCode": 23,
+  "versionName": "1.0.8",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "🔍 Recent searches ab sirf search box tap karne pe dikhenge (Apple Music jaisa)",
+  "notes": "🎵 Lyrics card: line long-press → Share/Save · 🔥 Trending · 🆕 New from your artists · 📻 Decade charts · 🔤 Galat spelling search · 👈 Queue swipe · 🔄 Taste sync · 🎙️ Podcasts fix",
   "force": false,
-  "size": 5031321,
-  "bytes": 5031321,
-  "sha256": "b6f89041a08445e98bdf721bd21f68f3df4131d134424ca4a4d6fd19cf412953"
+  "size": 5053857,
+  "bytes": 5053857,
+  "sha256": "4854f7333c0a5c06c691b6144fe719352e44960f594ce0dbf2a02c065e4b7aae"
 }
