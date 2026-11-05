@@ -1,10 +1,10 @@
 {
-  "versionCode": 24,
-  "versionName": "1.0.9",
+  "versionCode": 25,
+  "versionName": "1.0.10",
   "apkUrl": "https://dhun.sites.tab.bot/dhun.apk",
-  "notes": "📱 Tablet/foldable design: side menu, bottom player bar, cover + lyrics side by side · 📊 Better stats for admin · fixes",
+  "notes": "🎧 Listen Together: Auto quality — room ek hi quality pe chalega, sabke net ke hisaab se (kam net wale ke liye apne-aap halka) · fixes",
   "force": false,
-  "size": 5059001,
-  "bytes": 5059001,
-  "sha256": "16daab8297f9fd2aa0f90e0523ed91243e6e050426d8767ff1f9865cb3789e71"
+  "size": 5061205,
+  "bytes": 5061205,
+  "sha256": "a0c5db29a8cb9f01686a2b3688446d2b5d5bfbc9aa50ac26a1b0196758c0c1c3"
 }
