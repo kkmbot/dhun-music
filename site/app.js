@@ -247,7 +247,7 @@ function renderSettings() {
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button><a class="dealRow" href="${esc(deals.join || DEALS_JOIN_DEFAULT)}" target="_blank" rel="noopener"><i class="dealEmoji">🛍️</i><span>Join Deals channel <small class="sub">Daily deals</small></span></a></div>
-  ${footHTML()}<div class="verTag">v1.0.9 · web</div>`;
+  ${footHTML()}<div class="verTag">v1.0.10 · web</div>`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -367,7 +367,7 @@ const QNAME = { "320": "High", "160": "Normal", "96": "Data saver", "48": "Lowes
 const conn = () => navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
 const autoNet = () => { const c = conn(); return !!(c && c.type && c.type !== "unknown" && c.type !== "other"); };
 function netKind() { if (cfg.saver) return "cell"; const c = conn(); if (c && (c.type === "cellular" || c.saveData)) return "cell"; return "wifi"; }
-const curQ = () => netKind() === "cell" ? cfg.qCell : cfg.qWifi;
+const curQ = () => jamAutoQ() || (netKind() === "cell" ? cfg.qCell : cfg.qWifi);
 function withQ(u, q) { if (!u || !/saavncdn\.com/.test(u)) return u; if (q === "320" && /_160\.mp4/.test(u) && !/_320/.test(u)) q = "160"; return u.replace(/_(320|160|96|48|12)\.mp4/, `_${q}.mp4`); }
 const kbpsOf = u => { const m = /_(320|160|96|48|12)\.mp4/.exec(u || ""); return m ? m[1] : ""; };
 
@@ -1618,12 +1618,13 @@ function jamSheet(joinCode) {
       <div class="jamCodeBox"><small>Session code</small><div class="jamCodeBig">${esc(c)}</div><small>Dost ko ye code ya link bhejo</small></div>
       <div class="jamShare"><a class="jamWa" href="https://wa.me/?text=${txt}" target="_blank" rel="noopener">WhatsApp</a><a class="jamTg" href="https://t.me/share/url?url=${encodeURIComponent(jamLink(c))}&text=${encodeURIComponent("Mere saath Dhun pe ek saath gaane suno 🎧 Code: " + c)}" target="_blank" rel="noopener">Telegram</a><button data-s="jamCopy">${navigator.share ? "Share…" : "Copy link"}</button></div>
       <button class="jamChatBtn" data-s="jamChat">💬 Chat<b class="jamUnread">${jamUnread || ""}</b></button>
-      <div class="jamMemH">Sun rahe hain</div><div id="jamMem">${jamMemHTML()}</div></div>
+      ${jamAutoHTML()}<div class="jamMemH">Sun rahe hain</div><div id="jamMem">${jamMemHTML()}</div></div>
       <div class="sgroup"><button data-s="jamEnd" class="danger">Stop Listen Together (sabke liye)</button><button data-s="jamLeave">Leave (sirf main)</button></div>`, {
       jamChat: () => { closeSheet(); jamChatOpen(); return true; },
       jamEnd: () => { jamEndConfirm(); return true; },
       jamCopy: () => { const l = jamLink(c); if (navigator.share) { navigator.share({ title: "Dhun · Listen Together", text: jamShareText(c).split("\n")[0] + " Code: " + c, url: l }).catch(() => {}); return true; } (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(() => toast("Link copy ho gaya ✅")).catch(() => toast(l)); return true; },
       jamLeave: () => { jamLeave(false); },
+      jamAuto: () => { qlToggle(); return true; },
     });
     return;
   }
@@ -1633,8 +1634,9 @@ function jamSheet(joinCode) {
   showSheet(`<div class="sgroup jamSheet" id="jamBox" data-on="false"><div class="jamHead"><i class="jamIco">${JAM_ICON}</i><div><b>Listen Together</b><div class="sub">Dosto ke saath ek hi gaana, ek hi time pe — kahin bhi ho, koi bhi phone ho. Sab gaana badal / pause kar sakte hain.</div></div></div>
     <div class="jamBody">${inv}<label for="jamNameIn">Aapka naam</label><input id="jamNameIn" maxlength="24" placeholder="Naam likho" value="${esc(nm)}" autocomplete="off">
     ${joinCode ? `<button class="jamPri" data-s="jamJoinGo">Join karo 🎧</button>` : `<button class="jamPri" data-s="jamStartGo">Start Listen Together</button><div class="jamOr"><span>ya code se join karo</span></div><div class="jamJoinRow"><input id="jamCodeIn" maxlength="6" placeholder="CODE" value="${esc(code)}" autocapitalize="characters" autocomplete="off" spellcheck="false"><button class="jamSec" data-s="jamJoinGo">Join</button></div>`}
-    <div class="impErr" id="jamErr" hidden></div></div></div>`, {
+    ${jamAutoHTML()}<div class="impErr" id="jamErr" hidden></div></div></div>`, {
     jamStartGo: () => { if (!jamSaveName()) return true; jamUnlock(); jamStart(); return true; },
+    jamAuto: () => { qlToggle(); return true; },
     jamJoinGo: () => { if (!jamSaveName()) return true; const c = joinCode || (($("#jamCodeIn") || {}).value || ""); jamUnlock(); jamJoin(c); return true; },
   });
 }
@@ -5276,4 +5278,69 @@ window.__ping = { did: pgDid, pf: pgPf, v: PG_V, send: pgSend, state: () => ({ p
   window.__big = { V, dock, autoLyr, get off() { return off; } };
 } catch (e) {} })();
 /* ===== end v1.0.9 big screens A ===== */
+/* ===== v1.0.10: Listen Together — Auto quality: the room plays one quality that works for its weakest member ===== */
+const QL_LADDER = ["48", "96", "160", "320"], QL_MARGIN = 1.5;
+const QL = { on: store.get("jamAuto", true) !== false, cap: "", est: 0, estAt: 0, stalls: [], capAt: 0, samp: null, loadAt: 0, played: false, room: "", roomAt: 0, upWant: "", upSince: 0, caps: {}, lastPub: 0 };
+const qlStep = (q, d) => QL_LADDER[Math.min(QL_LADDER.length - 1, Math.max(0, QL_LADDER.indexOf(String(q)) + d))];
+function qlInitCap() { const c = conn(), dl = c && c.downlink; if (!dl) return "96"; for (let i = QL_LADDER.length - 1; i > 0; i--) if (+QL_LADDER[i] * QL_MARGIN <= dl * 600) return QL_LADDER[i]; return "48"; }
+function jamAutoQ() { try { return jamOn() && QL.on && QL.room ? QL.room : ""; } catch (e) { return ""; } }
+const qlBuf = () => { const r = audio.buffered, t = audio.currentTime; for (let i = 0; i < r.length; i++) if (t >= r.start(i) - 0.2 && t <= r.end(i) + 0.2) return r.end(i); return t; };
+// media events do not bubble: capture on document sees the current #audio element whichever one the app swapped in
+document.addEventListener("loadstart", e => { if (e.target === audio) { QL.loadAt = Date.now(); QL.played = false; } }, true); // a new file: its start-up wait is not a stall
+document.addEventListener("seeking", e => { if (e.target === audio) QL.loadAt = Date.now(); }, true);
+document.addEventListener("playing", e => { if (e.target === audio) QL.played = true; }, true);
+document.addEventListener("waiting", e => { if (e.target === audio && QL.played && audio.readyState > 0 && audio.currentTime > 0.5 && jamOn() && QL.on && !audio.paused && Date.now() - QL.loadAt > 1500) QL.stalls.push(Date.now()); }, true); // mid-song underrun only (a source swap also fires waiting at 0:00 with no data)
+function qlSample(now) { // throughput = audio seconds the browser adds to its buffer per second (× this file's bitrate), only while it is still filling
+  const src = audio.currentSrc || "", kb = +kbpsOf(src);
+  if (!/saavncdn\.com/.test(src)) { QL.samp = null; return; }
+  if (QL.samp && QL.samp.src !== src) QL.samp = null;
+  const b = qlBuf();
+  if (QL.samp && !audio.paused && audio.networkState === 2 && kb && now - QL.loadAt > 1500) {
+    const dt = (now - QL.samp.t) / 1000, db = b - QL.samp.b;
+    if (dt >= 0.8 && db >= 0) { const k = Math.min(20, db / dt) * kb; QL.est = QL.est ? QL.est * 0.6 + k * 0.4 : k; QL.estAt = now; }
+  }
+  QL.samp = { src, t: now, b };
+}
+function qlDecide(now) { // this phone's own ceiling: down fast after a stall, up after ~25 s of clear headroom
+  const top = QL.stalls.length ? QL.stalls[QL.stalls.length - 1] : 0;
+  QL.stalls = QL.stalls.filter(t => now - t < 90e3);
+  const fresh = QL.est && now - QL.estAt < 60e3 ? QL.est : 0, cap = +QL.cap, up = qlStep(QL.cap, 1), ahead = qlBuf() - audio.currentTime;
+  let next = QL.cap;
+  if (top && now - top < 3e3 && now - QL.capAt >= 5e3) next = qlStep(QL.cap, -1);                                   // stall: step down now
+  else if (fresh && now - QL.capAt >= 15e3 && fresh < QL_MARGIN * cap * 0.8) next = qlStep(QL.cap, -1);             // measured: cannot keep this up
+  else if (now - QL.capAt >= 25e3 && up !== QL.cap && !QL.stalls.some(t => now - t < 25e3) && (fresh ? fresh >= QL_MARGIN * +up : ahead >= 15)) next = up; // steady headroom
+  if (next !== QL.cap) { QL.cap = next; QL.capAt = now; QL.stalls = []; qlPublish(); }
+}
+function qlApplyRoom(now) { // the room plays the weakest fresh member's ceiling (own included)
+  let want = QL.cap;
+  for (const m of (jam.mem || [])) { const c = QL.caps[m.m]; if (c && now - c.rx < 30e3 && +c.q < +want) want = c.q; }
+  if (!QL.room) { QL.room = want; QL.roomAt = now; QL.loadAt = now; applyQualityNow(); return; }
+  if (want === QL.room) { QL.upWant = ""; return; }
+  if (+want < +QL.room) { QL.room = want; QL.roomAt = now; QL.upWant = ""; QL.loadAt = now; applyQualityNow(); return; } // a member got weaker: everyone steps down now, same spot in the song
+  if (QL.upWant !== want) { QL.upWant = want; QL.upSince = now; return; }
+  if (now - QL.upSince >= 20e3 && now - QL.roomAt >= 20e3) { QL.room = want; QL.roomAt = now; QL.upWant = ""; QL.loadAt = now; applyQualityNow(); } // stronger and held: step up, same spot
+}
+async function qlPublish() { // every member reports its own ceiling; the answer lists everyone's (fresh ones)
+  QL.lastPub = Date.now(); if (!jamOn() || !QL.on || !QL.cap) return; const code = jam.code;
+  try { const j = await jamReq("/api/jam/q", { c: code, m: jamMid, n: jamName(), q: +QL.cap }); if (j && j.caps && jamOn() && jam.code === code) { const rx = Date.now(); QL.caps = {}; for (const k of Object.keys(j.caps)) QL.caps[k] = { q: String(j.caps[k]), rx }; } } catch (e) {}
+}
+function qlTick() {
+  if (!jamOn()) { if (QL.room || QL.cap || QL.stalls.length) qlReset(); return; }
+  if (!QL.on) { if (QL.room) { QL.room = ""; applyQualityNow(); } return; }
+  const now = Date.now();
+  if (!QL.cap) { QL.cap = qlInitCap(); QL.capAt = now; qlPublish(); }
+  qlSample(now); qlDecide(now); qlApplyRoom(now);
+  if (now - QL.lastPub > 8e3) qlPublish();
+  if (now % 2000 < 1000) qlRowRefresh();
+}
+function qlReset() { QL.cap = ""; QL.room = ""; QL.caps = {}; QL.stalls = []; QL.samp = null; QL.upWant = ""; QL.est = 0; }
+setInterval(qlTick, 1000);
+const jamStopBeforeQL = jamStop;
+jamStop = function () { const had = !!QL.room; jamStopBeforeQL(); qlReset(); if (had) applyQualityNow(); }; // session over: this phone's own quality setting again, same spot
+const qlRowInner = () => `<span><b>Auto quality</b><small>${!QL.on ? "Off · apni quality setting chalegi" : jamOn() && QL.room ? "Auto · " + QL.room + " kbps — sabke liye ek hi" : "Auto · room ke liye check ho raha hai"}</small></span><i class="sw${QL.on ? " on" : ""}"></i>`;
+function qlRowRefresh() { document.querySelectorAll("[data-s=jamAuto]").forEach(b => { b.innerHTML = qlRowInner(); }); }
+function jamAutoHTML() { return `<button class="setRow jamAutoRow" data-s="jamAuto">${qlRowInner()}</button>`; }
+function qlToggle() { QL.on = !QL.on; store.set("jamAuto", QL.on); qlReset(); applyQualityNow(); qlRowRefresh(); }
+window.__ql = { get QL() { return QL; }, tick: qlTick, ladder: QL_LADDER, room: () => jamAutoQ() };
+/* ===== end v1.0.10 Auto quality ===== */
 })();

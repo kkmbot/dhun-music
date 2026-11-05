@@ -1237,6 +1237,7 @@ function jamDb(env) {
     d.prepare("CREATE TABLE IF NOT EXISTS jamm (code TEXT, mid TEXT, name TEXT, seen INTEGER, joined INTEGER, PRIMARY KEY (code, mid))"),
     d.prepare("CREATE TABLE IF NOT EXISTS jamc (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, mid TEXT, name TEXT, txt TEXT, ts INTEGER)"),
     d.prepare("CREATE INDEX IF NOT EXISTS jamc_code ON jamc (code, id)"),
+    d.prepare("CREATE TABLE IF NOT EXISTS jamq (code TEXT, mid TEXT, q INTEGER, at INTEGER, PRIMARY KEY (code, mid))"),
   ]).catch(e => { jamReady = null; throw e; });
   return jamReady.then(() => d);
 }
@@ -1369,11 +1370,20 @@ async function jamRoute(p, req, env, u) {
       const x = await jamRead(d, code, Date.now()); if (!x || x.ended) return J({ ok: true, already: true });
       const now = Date.now(), st = x.st; st.ended = { m: mid, n: name, at: now }; st.playing = false; st.ev = { t: "end" }; st.by = { m: mid, n: name };
       const r = await d.prepare("UPDATE jam SET st = ?, rev = rev + 1, upd = ? WHERE code = ? AND rev = ?").bind(JSON.stringify(st), now, code, x.rev).run();
-      if (r.meta && r.meta.changes) { try { await d.batch([d.prepare("DELETE FROM jamm WHERE code = ?").bind(code), d.prepare("DELETE FROM jamc WHERE code = ?").bind(code)]); } catch (e) {} return J({ ok: true, now: Date.now() }); }
+      if (r.meta && r.meta.changes) { try { await d.batch([d.prepare("DELETE FROM jamm WHERE code = ?").bind(code), d.prepare("DELETE FROM jamc WHERE code = ?").bind(code), d.prepare("DELETE FROM jamq WHERE code = ?").bind(code)]); } catch (e) {} return J({ ok: true, now: Date.now() }); }
     }
     return J({ ok: false, msg: "busy" }, 409);
   }
   if (p === "/api/jam/leave" && req.method === "POST") { await d.prepare("DELETE FROM jamm WHERE code = ? AND mid = ?").bind(code, mid).run(); return J({ ok: true }); }
+  if (p === "/api/jam/q" && req.method === "POST") { // v1.0.10 Auto quality: a member's own ceiling (48/96/160/320); answers the fresh ceilings of the room
+    const x = await jamRead(d, code, Date.now()); if (!x || x.ended) return jamGoneOut(x);
+    if (!mid || !x.mem.some(m => m.m === mid)) return J({ ok: false, msg: "not in room" });
+    const q = Number(b.q); if ([48, 96, 160, 320].includes(q)) await d.prepare("INSERT INTO jamq (code, mid, q, at) VALUES (?, ?, ?, ?) ON CONFLICT(code, mid) DO UPDATE SET q = excluded.q, at = excluded.at").bind(code, mid, q, Date.now()).run();
+    try { await touch(); } catch (e) {}
+    const now = Date.now(), rs = await d.prepare("SELECT mid, q FROM jamq WHERE code = ? AND at > ?").bind(code, now - 30e3).all();
+    const caps = {}; for (const row of (rs.results || [])) if (x.mem.some(m => m.m === row.mid)) caps[row.mid] = row.q;
+    return J({ ok: true, caps, now });
+  }
   if (p === "/api/jam/act" && req.method === "POST") {
     for (let k = 0; k < 5; k++) {
       const x = await jamRead(d, code, Date.now()); if (!x || x.ended) return jamGoneOut(x);
