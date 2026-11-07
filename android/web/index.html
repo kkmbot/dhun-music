@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Dhun</title>
+<meta name="description" content="Free, ad-free music player. Search anything, play it, add it to your home screen.">
+<meta property="og:title" content="Dhun — free, ad-free music">
+<meta property="og:description" content="Search any song, tap to play. Add to Home Screen and it works like an app.">
+<meta property="og:image" content="/icon-512.png">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dhun">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" href="/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preload" href="/fonts/comic-neue-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/app.css?v=35">
+</head>
+<body>
+<div id="app">
+  <main id="view"></main>
+
+  <div id="mini" class="hidden">
+    <img id="miniArt" alt="">
+    <div class="miniText"><div id="miniTitle"></div><div id="miniArtist"></div></div>
+    <button id="miniPlay" class="icon" aria-label="Play/Pause"></button>
+    <button id="miniNext" class="icon" aria-label="Next"></button>
+    <div id="miniProg"><div></div></div>
+  </div>
+
+  <div id="dealTick" class="hidden"><a href="https://t.me/bestdeal_shoppingonline" target="_blank" rel="noopener"><span class="dtB">🔥 Deals</span><span class="dtT"></span></a></div>
+
+  <nav id="tabs">
+    <button data-tab="home" class="on"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.5 14.5v-9l6 4.5-6 4.5z"/></svg><span>Listen Now</span></button>
+    <button data-tab="search"><svg viewBox="0 0 24 24"><path d="M10 3a7 7 0 015.6 11.2l4.6 4.6-1.4 1.4-4.6-4.6A7 7 0 1110 3zm0 2a5 5 0 100 10 5 5 0 000-10z"/></svg><span>Search</span></button>
+    <button data-tab="library"><svg viewBox="0 0 24 24"><path d="M4 3h2v18H4zm4 0h2v18H8zm4.3.6l1.9-.6 5.6 17.2-1.9.6z"/></svg><span>Library</span></button>
+  </nav>
+
+  <section id="np" aria-hidden="true">
+    <div id="npBg"></div>
+    <div class="npInner">
+      <button id="npClose" class="grab" aria-label="Close"><span></span></button>
+      <div id="npArtWrap"><img id="npArt" alt=""><div id="yt"></div></div>
+      <div class="npMeta">
+        <div class="npText"><div id="npTitle"></div><div id="npArtist"></div></div>
+        <button id="npLike" class="icon" aria-label="Like"></button>
+        <button id="npMore" class="icon" aria-label="More"></button>
+      </div>
+      <div id="seekWrap"><input id="seek" type="range" min="0" max="1000" value="0"><div class="times"><span id="tCur">0:00</span><button id="npQ" class="qpill">Wi‑Fi · 320 kbps</button><span id="tDur">0:00</span></div></div>
+      <div id="npStatus"></div>
+      <div class="ctrls">
+        <button id="npPrev" class="icon big" aria-label="Previous"></button>
+        <button id="npPlay" class="icon huge" aria-label="Play/Pause"></button>
+        <button id="npNext" class="icon big" aria-label="Next"></button>
+      </div>
+      <div class="npBottom">
+        <button id="npShuffle" class="icon small" aria-label="Shuffle"></button>
+        <button id="npQueueBtn" class="icon small" aria-label="Up Next"></button>
+        <button id="npDl" class="icon small" aria-label="Download"></button>
+        <button id="npRepeat" class="icon small" aria-label="Repeat"></button>
+      </div>
+      <div id="queuePanel" class="hidden"><div class="qHead"><b>Playing Next</b><span id="autoplayNote"></span></div><div id="queueList"></div></div>
+    </div>
+  </section>
+
+  <div id="sheetBack" class="hidden"></div>
+  <div id="sheet" class="hidden"></div>
+  <div id="toast"></div>
+</div>
+<audio id="audio" playsinline preload="auto"></audio>
+<script src="/native.js"></script>
+<script src="/festival.js?v=42" defer></script>
+<script src="/app.js?v=42"></script>
+</body>
+</html>

@@ -2021,8 +2021,8 @@ function greetData() {
   try { if (tgMe && tgMe.linked) name = realName(tgMe.first) || realName(String(tgMe.name || "").split(/\s+/)[0]); } catch (e) {}
   name = name.split(/\s+/)[0].slice(0, 18);
   const subs = GREET_SUB[k];
-  const dwG = (() => { try { const n = Date.now(); return n >= Date.parse("2026-11-07T00:00:00+05:30") && n < Date.parse("2026-11-09T00:00:00+05:30"); } catch (e) { return false; } })();
-  if (dwG) { const t2 = "Happy Diwali 🪔"; return { k, title: name ? t2.replace(/ (\S+)$/, `, ${name} $1`) : t2, sub: "Shubh Deepavali! Diwali ke gaane sunein? 🎆" }; }
+  const fG = (() => { try { return window.__fest && window.__fest.cur(); } catch (e) { return null; } })();
+  if (fG) return { k, title: name ? fG.wish.replace(/ (\S+)$/, `, ${name} $1`) : fG.wish, sub: fG.sub };
   return { k, title: name ? title.replace(/ (\S+)$/, `, ${name} $1`) : title, sub: subs[greetSeq % subs.length] };
 }
 function greetHTML() { const g = greetData(); return `<div class="greet ${g.k}" data-greet><b>${esc(g.title)}</b><small>${esc(g.sub)}</small></div>`; }
@@ -5345,40 +5345,46 @@ function jamAutoHTML() { return `<button class="setRow jamAutoRow" data-s="jamAu
 function qlToggle() { QL.on = !QL.on; store.set("jamAuto", QL.on); qlReset(); applyQualityNow(); qlRowRefresh(); }
 window.__ql = { get QL() { return QL; }, tick: qlTick, ladder: QL_LADDER, room: () => jamAutoQ() };
 /* ===== end v1.0.10 Auto quality ===== */
-/* ===== v1.0.12 Diwali 2026 (7-8 Nov IST): greeting + Diwali Hits row; self-removes after the window ===== */
-const dwOn = () => { const n = Date.now(); return n >= Date.parse("2026-11-07T00:00:00+05:30") && n < Date.parse("2026-11-09T00:00:00+05:30"); };
-let dwData = store.get("dwHits", null), dwBusy = false, dwPl = store.get("dwPls", null);
-function dwLoad() {
-  if (!dwOn() || dwBusy || !navigator.onLine || (dwData && Date.now() - dwData.at < 6 * 3600e3 && dwData.items.length && dwPl && dwPl.items && dwPl.items.length)) return;
-  dwBusy = true;
-  api("/api/svpls").then(d => { const p = ((d && d.playlists) || []).filter(x => x && x.id); if (p.length) { dwPl = { at: Date.now(), items: p }; store.set("dwPls", dwPl); if (v32Home()) dwPaint(); } }).catch(() => {});
-  Promise.all(["diwali hits", "happy diwali songs", "deepavali party songs hindi"].map(q => api("/api/search?q=" + encodeURIComponent(q)).catch(() => null))).then(rs => {
+/* ===== v1.0.17 Festivals: greeting + songs/playlists rows on Home while a festival is on (calendar in festival.js) ===== */
+const fsCur = () => { try { return window.__fest && window.__fest.cur(); } catch (e) { return null; } };
+let fsData = store.get("fsHits", null), fsPl = store.get("fsPls", null), fsBusy = false;
+function fsLoad() {
+  const f = fsCur(); if (!f || fsBusy || !navigator.onLine) return;
+  const okH = fsData && fsData.k === f.key && Date.now() - fsData.at < 6 * 3600e3 && fsData.items.length;
+  const okP = fsPl && fsPl.k === f.key && Date.now() - fsPl.at < 6 * 3600e3 && fsPl.items.length;
+  if (okH && okP) return;
+  fsBusy = true; const key = f.key;
+  api("/api/svpls?q=" + encodeURIComponent(f.plQ.join("|")) + "&re=" + encodeURIComponent(f.plRe)).then(d => {
+    const p = ((d && d.playlists) || []).filter(x => x && x.id); if (!p.length) return;
+    fsPl = { k: key, at: Date.now(), items: p }; store.set("fsPls", fsPl);
+    const c = fsCur(); if (c && c.key === key && v32Home()) fsPaint();
+  }).catch(() => {});
+  Promise.all(f.songQ.map(q => api("/api/search?q=" + encodeURIComponent(q)).catch(() => null))).then(rs => {
     const seen = new Set(), items = [];
     for (let i = 0; i < 15; i++) for (const d of rs) { const t = d && d.items && d.items[i]; if (!t || !t.id) continue; const k = String(t.title || "").toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9]/g, "") + "|" + String(t.artist || "").toLowerCase().split(",")[0].replace(/[^a-z0-9]/g, ""); if (seen.has(k) || items.length >= 15) continue; seen.add(k); items.push(t); }
     if (!items.length) return;
-    dwData = { at: Date.now(), items }; store.set("dwHits", dwData);
-    if (v32Home()) dwPaint();
-  }).catch(() => {}).finally(() => { dwBusy = false; });
+    fsData = { k: key, at: Date.now(), items }; store.set("fsHits", fsData);
+    const c = fsCur(); if (c && c.key === key && v32Home()) fsPaint();
+  }).catch(() => {}).finally(() => { fsBusy = false; });
 }
-function dwPaint() {
-  if (!v32Home()) return; v32Rm(".dwH, .dwRow, .dwPH, .dwPRow");
-  if (!dwOn()) return;
-  const items = (dwData && dwData.items) || [], pls = (dwPl && dwPl.items) || [];
+function fsPaint() {
+  if (!v32Home()) return; v32Rm(".fsH, .fsRow, .fsPH, .fsPRow");
+  const f = fsCur(); if (!f) return;
+  const items = (fsData && fsData.k === f.key && fsData.items) || [], pls = (fsPl && fsPl.k === f.key && fsPl.items) || [];
   if (!items.length && !pls.length) return;
   let h = "";
-  if (items.length) { bindList("dwHits", items);
-    h += `<h2 class="dwH">🪔 Diwali Hits</h2><div class="car dwRow">${items.map((t, i) => `<button class="tile" data-ctx="dwHits" data-i="${i}" data-id="${esc(t.id)}"><span class="nwArt"><img loading="lazy" src="${esc(small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"></span><div class="t1">${esc(t.title)}</div><div class="t2">${esc(t.artist || "")}</div></button>`).join("")}</div>`; }
-  if (pls.length) h += `<h2 class="dwPH">🪔 Diwali Playlists</h2><div class="car dwPRow">${pls.map(p => `<button class="tile" data-svpl="${esc(p.id)}"><img loading="lazy" src="${esc(p.image || "/icon-192.png")}" onerror="this.onerror=null;this.src='/icon-192.png'" alt=""><div class="t1">${esc(p.title)}</div><div class="t2">${p.count ? p.count + " songs" : "Playlist"}</div></button>`).join("")}</div>`;
+  if (items.length) { bindList("fsHits", items);
+    h += `<h2 class="fsH">${esc(f.emoji)} ${esc(f.name)} Hits</h2><div class="car fsRow">${items.map((t, i) => `<button class="tile" data-ctx="fsHits" data-i="${i}" data-id="${esc(t.id)}"><span class="nwArt"><img loading="lazy" src="${esc(small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"></span><div class="t1">${esc(t.title)}</div><div class="t2">${esc(t.artist || "")}</div></button>`).join("")}</div>`; }
+  if (pls.length) h += `<h2 class="fsPH">${esc(f.emoji)} ${esc(f.name)} Playlists</h2><div class="car fsPRow">${pls.map(p => `<button class="tile" data-svpl="${esc(p.id)}"><img loading="lazy" src="${esc(p.image || "/icon-192.png")}" onerror="this.onerror=null;this.src='/icon-192.png'" alt=""><div class="t1">${esc(p.title)}</div><div class="t2">${p.count ? p.count + " songs" : "Playlist"}</div></button>`).join("")}</div>`;
   const tmp = document.createElement("div"); tmp.innerHTML = h;
-  const a = view.querySelector("#dwStrip") || view.querySelector("[data-greet]") || view.querySelector("h1.hrow");
-  const g = view.querySelector("[data-greet]");
+  const g = view.querySelector("[data-greet]"), a = view.querySelector("#fsStrip") || view.querySelector("h1.hrow");
   if (g) g.after(...tmp.childNodes); else if (a) a.after(...tmp.childNodes); else view.append(...tmp.childNodes);
 }
 { const raw = renderHome; renderHome = function () {
   const r = raw.apply(this, arguments);
-  try { if (v32Home() && dwOn()) { dwPaint(); dwLoad(); } } catch (e) { console.warn("diwali home", e); }
+  try { if (v32Home()) { if (fsCur()) { fsPaint(); fsLoad(); } else v32Rm(".fsH, .fsRow, .fsPH, .fsPRow"); } } catch (e) { console.warn("festival home", e); }
   return r;
 }; }
-document.addEventListener("visibilitychange", () => { if (!document.hidden && dwOn()) dwLoad(); });
-/* ===== end Diwali ===== */
+document.addEventListener("visibilitychange", () => { if (!document.hidden && fsCur()) fsLoad(); });
+/* ===== end Festivals ===== */
 })();
