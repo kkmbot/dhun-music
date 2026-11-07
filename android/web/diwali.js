@@ -1,6 +1,6 @@
 (function(){
-// Diwali 2026 decoration: shows only 8-12 Nov 2026 (IST), then does nothing. Pure canvas, no network, pauses when hidden.
-var START=Date.parse("2026-11-08T00:00:00+05:30"),END=Date.parse("2026-11-13T00:00:00+05:30");
+// Diwali 2026 decoration: shows 7-8 Nov 2026 (IST), then does nothing. Pure canvas, no network, pauses when hidden.
+var START=Date.parse("2026-11-07T00:00:00+05:30"),END=Date.parse("2026-11-09T00:00:00+05:30");
 function on(){var n=Date.now();return n>=START&&n<END;}
 if(!on())return;
 var reduce=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
