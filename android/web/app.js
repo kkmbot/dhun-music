@@ -5347,10 +5347,11 @@ window.__ql = { get QL() { return QL; }, tick: qlTick, ladder: QL_LADDER, room: 
 /* ===== end v1.0.10 Auto quality ===== */
 /* ===== v1.0.12 Diwali 2026 (7-8 Nov IST): greeting + Diwali Hits row; self-removes after the window ===== */
 const dwOn = () => { const n = Date.now(); return n >= Date.parse("2026-11-07T00:00:00+05:30") && n < Date.parse("2026-11-09T00:00:00+05:30"); };
-let dwData = store.get("dwHits", null), dwBusy = false;
+let dwData = store.get("dwHits", null), dwBusy = false, dwPl = store.get("dwPls", null);
 function dwLoad() {
-  if (!dwOn() || dwBusy || !navigator.onLine || (dwData && Date.now() - dwData.at < 6 * 3600e3 && dwData.items.length)) return;
+  if (!dwOn() || dwBusy || !navigator.onLine || (dwData && Date.now() - dwData.at < 6 * 3600e3 && dwData.items.length && dwPl && dwPl.items && dwPl.items.length)) return;
   dwBusy = true;
+  api("/api/svpls").then(d => { const p = ((d && d.playlists) || []).filter(x => x && x.id); if (p.length) { dwPl = { at: Date.now(), items: p }; store.set("dwPls", dwPl); if (v32Home()) dwPaint(); } }).catch(() => {});
   Promise.all(["diwali hits", "happy diwali songs", "deepavali party songs hindi"].map(q => api("/api/search?q=" + encodeURIComponent(q)).catch(() => null))).then(rs => {
     const seen = new Set(), items = [];
     for (let i = 0; i < 15; i++) for (const d of rs) { const t = d && d.items && d.items[i]; if (!t || !t.id) continue; const k = String(t.title || "").toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9]/g, "") + "|" + String(t.artist || "").toLowerCase().split(",")[0].replace(/[^a-z0-9]/g, ""); if (seen.has(k) || items.length >= 15) continue; seen.add(k); items.push(t); }
@@ -5360,14 +5361,18 @@ function dwLoad() {
   }).catch(() => {}).finally(() => { dwBusy = false; });
 }
 function dwPaint() {
-  if (!v32Home()) return; v32Rm(".dwH, .dwRow");
+  if (!v32Home()) return; v32Rm(".dwH, .dwRow, .dwPH, .dwPRow");
   if (!dwOn()) return;
-  const items = (dwData && dwData.items) || []; if (!items.length) return;
-  bindList("dwHits", items);
-  const h = `<h2 class="dwH">🪔 Diwali Hits</h2><div class="car dwRow">${items.map((t, i) => `<button class="tile" data-ctx="dwHits" data-i="${i}" data-id="${esc(t.id)}"><span class="nwArt"><img loading="lazy" src="${esc(small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"></span><div class="t1">${esc(t.title)}</div><div class="t2">${esc(t.artist || "")}</div></button>`).join("")}</div>`;
+  const items = (dwData && dwData.items) || [], pls = (dwPl && dwPl.items) || [];
+  if (!items.length && !pls.length) return;
+  let h = "";
+  if (items.length) { bindList("dwHits", items);
+    h += `<h2 class="dwH">🪔 Diwali Hits</h2><div class="car dwRow">${items.map((t, i) => `<button class="tile" data-ctx="dwHits" data-i="${i}" data-id="${esc(t.id)}"><span class="nwArt"><img loading="lazy" src="${esc(small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"></span><div class="t1">${esc(t.title)}</div><div class="t2">${esc(t.artist || "")}</div></button>`).join("")}</div>`; }
+  if (pls.length) h += `<h2 class="dwPH">🪔 Diwali Playlists</h2><div class="car dwPRow">${pls.map(p => `<button class="tile" data-svpl="${esc(p.id)}"><img loading="lazy" src="${esc(p.image || "/icon-192.png")}" onerror="this.onerror=null;this.src='/icon-192.png'" alt=""><div class="t1">${esc(p.title)}</div><div class="t2">${p.count ? p.count + " songs" : "Playlist"}</div></button>`).join("")}</div>`;
   const tmp = document.createElement("div"); tmp.innerHTML = h;
-  const a = view.querySelector("[data-greet]") || view.querySelector("h1.hrow");
-  if (a) a.after(...tmp.childNodes); else view.append(...tmp.childNodes);
+  const a = view.querySelector("#dwStrip") || view.querySelector("[data-greet]") || view.querySelector("h1.hrow");
+  const g = view.querySelector("[data-greet]");
+  if (g) g.after(...tmp.childNodes); else if (a) a.after(...tmp.childNodes); else view.append(...tmp.childNodes);
 }
 { const raw = renderHome; renderHome = function () {
   const r = raw.apply(this, arguments);
