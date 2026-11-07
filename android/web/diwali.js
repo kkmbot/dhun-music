@@ -5,12 +5,13 @@ function on(){var n=Date.now();return n>=START&&n<END;}
 if(!on())return;
 var reduce=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
 var st=document.createElement("style");
-st.textContent="#diwaliFx{position:fixed;left:0;top:0;width:100%;pointer-events:none;z-index:6}#mini{box-shadow:0 0 0 1.5px rgba(255,179,0,.65),0 0 18px rgba(255,179,0,.4),0 6px 24px rgba(0,0,0,.5)!important}";
+st.textContent="#diwaliRow{position:fixed;left:0;right:0;top:max(0px,calc(env(safe-area-inset-top,0px) - 24px));height:28px;display:flex;justify-content:space-around;align-items:flex-end;pointer-events:none;z-index:17;background:linear-gradient(to bottom,rgba(255,170,40,.10),rgba(255,170,40,0))}#diwaliRow:before{content:'';position:absolute;left:0;right:0;top:3px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,190,80,.7),transparent)}#diwaliRow span{font-size:18px;line-height:22px;display:block;filter:drop-shadow(0 0 7px rgba(255,170,30,.9));animation:dwF 1.7s ease-in-out infinite alternate}@keyframes dwF{from{opacity:.78;transform:scale(.94)}to{opacity:1;transform:scale(1.1)}}@media (prefers-reduced-motion:reduce){#diwaliRow span{animation:none}}#diwaliFx{position:fixed;left:0;top:0;width:100%;pointer-events:none;z-index:17}#mini{box-shadow:0 0 0 1.5px rgba(255,179,0,.65),0 0 18px rgba(255,179,0,.4),0 6px 24px rgba(0,0,0,.5)!important}";
 document.head.appendChild(st);
 var C=document.createElement("canvas");C.id="diwaliFx";document.body.appendChild(C);
+var R=document.createElement("div");R.id="diwaliRow";R.innerHTML=new Array(8).join("x").split("x").map(function(_,i){return '<span style="animation-delay:-'+(i*0.37).toFixed(2)+'s">🪔</span>';}).join("");document.body.appendChild(R);
 var X=C.getContext("2d"),dpr=Math.min(2,window.devicePixelRatio||1),W=0,H=0,stars=[],T=0,last=0,raf=0,top=0;
 function size(){top=0;try{var p=document.createElement("div");p.style.cssText="position:fixed;top:0;padding-top:env(safe-area-inset-top);visibility:hidden";document.body.appendChild(p);top=p.getBoundingClientRect().height;p.remove();}catch(e){}
-  W=window.innerWidth;H=top+86;C.width=W*dpr;C.height=H*dpr;C.style.height=H+"px";X.setTransform(dpr,0,0,dpr,0,0);
+  W=window.innerWidth;H=top+120;C.width=W*dpr;C.height=H*dpr;C.style.height=H+"px";X.setTransform(dpr,0,0,dpr,0,0);
   stars=[];for(var i=0;i<14;i++)stars.push({x:Math.random()*W,y:Math.random()*H,r:2+Math.random()*3.5,ph:Math.random()*6});}
 function diya(x,y,s,t){var f=.85+.15*Math.sin(t*7+x)+.08*Math.sin(t*13+y);
   X.save();X.translate(x,y);X.scale(s,s);
@@ -21,13 +22,10 @@ function diya(x,y,s,t){var f=.85+.15*Math.sin(t*7+x)+.08*Math.sin(t*13+y);
   X.fillStyle="#fff3c4";X.beginPath();X.ellipse(0,-11,2.2,5*f,0,0,Math.PI*2);X.fill();X.restore();}
 function star(x,y,r,a){X.save();X.globalAlpha=a;X.fillStyle="#ffe9a8";X.beginPath();for(var i=0;i<8;i++){var rr=i%2?r*.35:r,an=i*Math.PI/4;X.lineTo(x+Math.cos(an)*rr,y+Math.sin(an)*rr);}X.fill();X.restore();}
 function draw(t){X.clearRect(0,0,W,H);var n=Math.max(5,Math.round(W/62)),base=top-6;
-  X.strokeStyle="rgba(255,190,80,.55)";X.lineWidth=1.2;X.beginPath();
-  for(var d=0;d<=n;d++){var x=(d+.5)*W/(n+1),y=base+10+10*Math.sin(d*1.7);if(d===0)X.moveTo(0,base);X.quadraticCurveTo(x-W/(n+1)/2,base+18,x,y);}X.stroke();
-  for(var d2=0;d2<n;d2++){diya((d2+.5)*W/n,base+22+6*Math.sin(d2*1.7),.46,t+d2);}
   for(var i=0;i<stars.length;i++){var q=stars[i];star(q.x,q.y,q.r,.2+.4*Math.abs(Math.sin(t*1.6+q.ph)));}}
 function frame(ts){if(!on()){stop(true);return;}
   if(ts-last>=33){T+=Math.min(.1,(ts-last)/1000);last=ts;draw(T);}raf=requestAnimationFrame(frame);}
-function stop(remove){cancelAnimationFrame(raf);raf=0;if(remove){C.remove();st.remove();}}
+function stop(remove){cancelAnimationFrame(raf);raf=0;if(remove){C.remove();R.remove();st.remove();}}
 function go(){if(reduce){draw(0);return;}if(!raf)raf=requestAnimationFrame(frame);}
 document.addEventListener("visibilitychange",function(){if(document.hidden)stop(false);else{if(!on()){stop(true);return;}go();}});
 window.addEventListener("resize",function(){size();if(reduce)draw(0);});

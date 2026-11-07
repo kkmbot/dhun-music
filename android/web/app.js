@@ -1,7 +1,5 @@
 (() => {
 "use strict";
-const NATIVE = !!window.DHUN_NATIVE; // true inside the Android app
-const API_BASE = NATIVE ? window.DHUN_API : "";
 const $ = s => document.querySelector(s);
 let audio = $("#audio");
 const ICON = {
@@ -43,10 +41,6 @@ let liked = store.get("liked", []);
 let playlists = store.get("playlists", []);
 let recent = store.get("recent", []);
 let searches = store.get("searches", []);
-// phone downloads (Android app): id -> { t, fp, ap, file, art, bytes, q, at }
-let offIdx = NATIVE ? store.get("offList", {}) : {};
-const offJobs = new Map(); let offWait = [], offActive = 0, offBatch = null;
-const isOff = id => !!offIdx[id];
 // listening history / For You / Recap / import state (declared early: render functions use them on first paint)
 const dayKey = (ts = Date.now()) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 let hist = (() => { const h = store.get("hist", null); return h && Array.isArray(h.songs) && h.days ? h : { songs: [], days: {} }; })();
@@ -85,16 +79,16 @@ function reg(list) { list.forEach(t => trackMap.set(t.id, t)); return list; }
 // ---------- rendering helpers ----------
 function rowHTML(t, i, ctx) {
   const cur = queue[qi] && queue[qi].id === t.id; const j = dlJobs.get(t.id);
-  const mark = (isOff(t.id) ? `<i class="dlm ph">${ICON.dlDone}</i>` : offJobs.has(t.id) ? `<i class="dlm busy">↓</i>` : "") + (isDl(t.id) ? `<i class="dlm tg">${TGICON}</i>` : j ? `<i class="dlm busy">…</i>` : "");
-  return `<div class="row${cur ? " playing" : ""}${!navigator.onLine && !isOff(t.id) ? " dim" : ""}" data-ctx="${ctx}" data-i="${i}" data-id="${esc(t.id)}"><img loading="lazy" src="${esc(artUrls.get(t.id) || small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"><div class="t"><div class="t1">${esc(t.title)}</div><div class="t2">${mark}${esc([t.artist, t.album && t.album !== t.title ? t.album : ""].filter(Boolean).join(" · "))}${t.dur ? " · " + fmt(t.dur) : ""}</div></div><button class="icon more" data-more="${esc(t.id)}">${ICON.dots}</button></div>`;
+  const mark = isDl(t.id) ? `<i class="dlm">${ICON.dlDone}</i>` : j ? `<i class="dlm busy">…</i>` : "";
+  return `<div class="row${cur ? " playing" : ""}${!navigator.onLine ? " dim" : ""}" data-ctx="${ctx}" data-i="${i}" data-id="${esc(t.id)}"><img loading="lazy" src="${esc(artUrls.get(t.id) || small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"><div class="t"><div class="t1">${esc(t.title)}</div><div class="t2">${mark}${esc([t.artist, t.album && t.album !== t.title ? t.album : ""].filter(Boolean).join(" · "))}${t.dur ? " · " + fmt(t.dur) : ""}</div></div><button class="icon more" data-more="${esc(t.id)}">${ICON.dots}</button></div>`;
 }
 function tileHTML(t, i, ctx) {
-  return `<button class="tile" data-ctx="${ctx}" data-i="${i}" data-id="${esc(t.id)}"><img loading="lazy" src="${esc(artUrls.get(t.id) || small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"><div class="t1">${esc(t.title)}</div><div class="t2">${esc(t.artist)}</div></button>`;
+  return `<button class="tile" data-ctx="${ctx}" data-i="${i}" data-id="${esc(t.id)}"><img loading="lazy" src="${esc(small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"><div class="t1">${esc(t.title)}</div><div class="t2">${esc(t.artist)}</div></button>`;
 }
 const lists = {}; // ctx -> array of tracks (for play-from-list)
 function bindList(ctx, arr) { lists[ctx] = reg(arr); }
 function plArtHTML(pl) {
-  const imgs = pl.tracks.slice(0, 4).map(t => `<img src="${esc(artUrls.get(t.id) || small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'">`);
+  const imgs = pl.tracks.slice(0, 4).map(t => `<img src="${esc(small(t.thumb) || ytThumb(t.id))}">`);
   if (!imgs.length) return `<div class="plArt one"><div class="ph">${ICON.note}</div></div>`;
   if (imgs.length < 4) return `<div class="plArt one">${imgs[0]}</div>`;
   return `<div class="plArt">${imgs.join("")}</div>`;
@@ -111,15 +105,14 @@ function rerender() { const y = view.scrollTop; ({ home: renderHome, search: ren
 let homeData = store.get("homeCache", null);
 let homeLoading = false;
 function installCard() {
-  if (NATIVE) return "";
   const standalone = window.navigator.standalone || matchMedia("(display-mode: standalone)").matches;
   if (standalone || store.get("hideInstall", false)) return "";
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
   return `<div class="install"><button data-act="hideInstall">×</button><b>Make it an app:</b> ${ios ? "tap the Share button <b>⎋</b> in Safari, then <b>Add to Home Screen</b>." : "open your browser menu and choose <b>Add to Home Screen</b> / <b>Install app</b>."} It opens full-screen, no ads, keeps playing when you lock your phone.</div>`;
 }
 function renderHome() {
-  let h = `<h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}${dealsHomeHTML()}${fyHomeHTML()}`;
-  if (!navigator.onLine) h += NATIVE ? `<div class="install offline"><b>You're offline.</b> Your downloaded songs still play. <a data-open="offline" style="color:#fa2d48;font-weight:600">Open Downloaded ›</a></div>` : `<div class="install offline"><b>You're offline.</b> Dhun needs internet to play. Your downloaded songs are safe in Telegram.</div>`;
+  let h = `<div class="brandBar"><img src="/logo-h2.webp?v=23" alt="Dhun" width="90" height="36"></div><h1 class="hrow">Listen Now<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${installCard()}${dealsHomeHTML()}${fyHomeHTML()}`;
+  if (!navigator.onLine) h += `<div class="install offline"><b>You're offline.</b> Dhun needs internet to play. Your downloaded songs are safe in Telegram.</div>`;
   if (recent.length) { bindList("recent", recent.slice(0, 20)); h += `<h2>Recently Played</h2><div class="car">${recent.slice(0, 20).map((t, i) => tileHTML(t, i, "recent")).join("")}</div>`; }
   if (homeData) {
     homeData.shelves.forEach((s, si) => { bindList("shelf" + si, s.items); h += `<h2>${esc(s.title)} <a data-q="${esc(s.query)}">See All</a></h2><div class="car">${s.items.map((t, i) => tileHTML(t, i, "shelf" + si)).join("")}</div>`; });
@@ -178,15 +171,12 @@ async function doSearch(text, kind) {
   s.loading = false; if (curTab === "search") renderSearch();
 }
 
-const FOOTER = () => `<div class="dhunFoot"><img src="/dhun-mark.png" alt="Dhun" width="30" height="30"><div class="f0">Created with</div><div class="f1">Support &amp; Love</div><div class="sig">Mavi💖</div><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>Contact us</span></a></div>`;
 function renderLibrary() {
   if (subView === "settings") return renderSettings();
   if (subView === "recap") return renderRecap();
   if (subView) return renderPlaylistView(subView);
   const nd = Object.keys(dlIdx).length;
-  const no = Object.keys(offIdx).length;
   let h = `<h1 class="hrow">Library<button class="icon gear" data-act="settings" aria-label="Settings">${ICON.gear}</button></h1>${acctHTML(true)}<div class="libLinks">
-    ${NATIVE ? `<button data-open="offline">${ICON.dlDone}<span>Downloaded <small class="sub">${no} song${no === 1 ? "" : "s"} · on this phone, no internet needed${offJobs.size ? ` · ${offJobs.size} downloading` : ""}</small></span></button>` : ""}
     <button data-open="liked">${ICON.heart}<span>Liked Songs <small class="sub">${liked.length}</small></span></button>
     <button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${tgMe.linked ? `${nd} song${nd === 1 ? "" : "s"}${tgMe.username ? " · @" + esc(tgMe.username) : ""}` : "Not connected"}${dlJobs.size ? ` · ${dlJobs.size} sending` : ""}</small></span></button>
     <button data-open="recent">${ICON.clock}<span>Recently Played</span></button>
@@ -196,19 +186,19 @@ function renderLibrary() {
   if (playlists.length) {
     h += `<h2>Playlists</h2><div class="grid">${playlists.map(pl => `<button class="tile" data-open="${esc(pl.id)}">${plArtHTML(pl)}<div class="t1">${esc(pl.name)}</div><div class="t2">${pl.tracks.length} song${pl.tracks.length === 1 ? "" : "s"}</div></button>`).join("")}</div>`;
   }
-  h += dealsJoinHTML() + FOOTER();
+  h += dealsJoinHTML() + footHTML();
   view.innerHTML = h;
 }
 function dlTracks() { return Object.values(dlIdx).sort((a, b) => b.at - a.at).map(x => x.t); }
-function getPlaylist(id) { if (String(id).startsWith("sv:")) return svPlGet(String(id).slice(3)); if (id === "offline") return { id, name: "Downloaded", tracks: offTracks(), fixed: true, off: true }; if (id === "downloads") return { id, name: "Telegram Downloads", tracks: dlTracks(), fixed: true, dl: true }; if (id === "liked") return { id, name: "Liked Songs", tracks: liked, fixed: true }; if (id === "recent") return { id, name: "Recently Played", tracks: recent, fixed: true }; return playlists.find(p => p.id === id); }
+function getPlaylist(id) { if (String(id).startsWith("sv:")) return svPlGet(String(id).slice(3)); if (id === "downloads") return { id, name: "Telegram Downloads", tracks: dlTracks(), fixed: true, dl: true }; if (id === "liked") return { id, name: "Liked Songs", tracks: liked, fixed: true }; if (id === "recent") return { id, name: "Recently Played", tracks: recent, fixed: true }; return playlists.find(p => p.id === id); }
 function renderPlaylistView(id) {
   const pl = getPlaylist(id); if (!pl) { subView = null; return renderLibrary(); }
   bindList("pl:" + id, pl.tracks);
   view.innerHTML = `<button class="back" data-act="back">${ICON.chev}${pl.remote && svBackHome ? "Listen Now" : "Library"}</button>
   <div class="hero">${plArtHTML(pl)}<h3>${esc(pl.name)}</h3><div class="sub">${pl.tracks.length} song${pl.tracks.length === 1 ? "" : "s"}</div></div>
   ${pl.tracks.length ? `<div class="btnRow"><button data-act="plPlay">${ICON.play}Play</button><button data-act="plShuffle">${ICON.shuffle}Shuffle</button></div>` : ""}
-  ${pl.off ? offInfoHTML() : pl.dl ? dlInfoHTML() + (pl.tracks.length ? offAllHTML(pl.tracks) : "") : pl.tracks.length && id !== "recent" ? offAllHTML(pl.tracks) + dlAllHTML(pl.tracks) : ""}
-  ${pl.tracks.map((t, i) => rowHTML(t, i, "pl:" + id)).join("") || (pl.off ? `<div class="empty">No downloaded songs yet. Tap “···” on any song and choose <b>Download to phone</b>, or use <b>Download All to phone</b> on Liked Songs or a playlist. They play here with no internet.</div>` : pl.dl ? `<div class="empty">${tgMe.linked ? "Nothing here yet. Tap “···” on a song and choose Download to Telegram, or use Download All on Liked Songs or a playlist." : ""}</div>` : `<div class="empty">No songs yet. Tap “···” on any song and choose Add to Playlist.</div>`)}
+  ${pl.dl ? dlInfoHTML() : pl.tracks.length && id !== "recent" ? dlAllHTML(pl.tracks) : ""}
+  ${pl.tracks.map((t, i) => rowHTML(t, i, "pl:" + id)).join("") || (pl.dl ? `<div class="empty">${tgMe.linked ? "Nothing here yet. Tap “···” on a song and choose Download to Telegram, or use Download All on Liked Songs or a playlist." : ""}</div>` : `<div class="empty">No songs yet. Tap “···” on any song and choose Add to Playlist.</div>`)}
   ${pl.dl && tgMe.linked ? `<div class="btnRow" style="margin-top:20px"><button data-act="tgOff" style="color:#ff453a">Log out</button></div>` : ""}
   ${pl.remote ? (pl.tracks.length ? `<div class="btnRow" style="margin-top:20px"><button data-act="savePl">${ICON.plus}Add to Library</button></div>` : pl.loading ? `<div class="empty">Loading…</div>` : "") : pl.fixed ? "" : `<div class="btnRow" style="margin-top:20px"><button data-act="renamePl">Rename</button><button data-act="deletePl" style="color:#ff453a">Delete Playlist</button></div>`}`;
 }
@@ -226,6 +216,9 @@ function dlInfoHTML() {
   return `<div class="setNote tgNote" style="margin:0 20px 12px">Connected${tgMe.username ? ` as <b>@${esc(tgMe.username)}</b>` : ""} ✅ · ${n} song${n === 1 ? "" : "s"}${dlJobs.size ? ` · ${dlJobs.size} sending` : ""}<br>Songs are saved in your Telegram chat with @${esc(tgBot)}, <b>not on this phone</b>. Tap a song here to play it from Telegram (needs internet).<div class="btnRow" style="padding:12px 0 0;margin:0"><a class="tgB" href="https://t.me/${esc(tgBot)}" target="_blank" rel="noopener">${TGICON}Open in Telegram</a></div></div>`;
 }
 function segHTML(k, opts) { return `<div class="seg">${opts.map(v => `<button data-act="q" data-k="${k}" data-v="${v}" class="${cfg[k] === v ? "on" : ""}">${QNAME[v]}<small>${v}</small></button>`).join("")}</div>`; }
+function footHTML() {
+  return `<div class="dhunFoot"><img src="/dhun-mark.webp?v=16" alt="Dhun" width="30" height="30"><div class="f0">Created with</div><div class="f1">Support &amp; Love</div><div class="sig">Mavi💖</div><a class="contactPill" href="https://t.me/Memer_guru" target="_blank" rel="noopener">${TGICON}<span>Contact us</span></a></div>`;
+}
 function renderSettings() {
   const auto = autoNet(), c = conn(), cell = netKind() === "cell";
   const n = Object.keys(dlIdx).length, bytes = Object.values(dlIdx).reduce((a, x) => a + (x.bytes || 0), 0);
@@ -239,26 +232,22 @@ function renderSettings() {
     <button class="setRow" data-act="saver"><span><b>Data saver mode</b><small>Use the mobile data quality right now</small></span><i class="sw${cfg.saver ? " on" : ""}"></i></button>
     <div class="setNote">${auto ? `Your browser says you're on <b>${c.type === "cellular" ? "mobile data" : "Wi‑Fi"}</b>, so quality switches automatically.` : `iPhone doesn't tell websites if you're on Wi‑Fi or mobile data, so <b>turn on Data saver when you leave Wi‑Fi</b>. Quick switch: tap the quality badge under the progress bar on the Now Playing screen.`}<br>Playing now at: <b>${cell ? "Data saver" : "Wi‑Fi"} · ${curQ()} kbps</b></div>
   </div>
-  ${NATIVE ? `<h2>Downloaded on this phone</h2>
-  <div class="setCard"><button class="setRow" data-open="offline"><span><b>Downloaded songs</b><small>${Object.keys(offIdx).length} songs · ${mb(Object.values(offIdx).reduce((a, x) => a + (x.bytes || 0), 0))} · play with no internet</small></span>${ICON.dlDone}</button>
-    <div class="setNote">Uses the download quality below. Songs stay inside the Dhun app and are deleted if you uninstall it.</div>
-    ${Object.keys(offIdx).length ? `<div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="offClear" style="color:#ff453a">Delete all phone downloads</button></div>` : ""}</div>` : ""}
-  <h2>${NATIVE ? "Download quality" : "Download to Telegram"}</h2>
-  <div class="setCard">${segHTML("qDl", ["320", "160", "96"])}<div class="setNote">About ${cfg.qDl === "320" ? "10" : cfg.qDl === "160" ? "5" : "3"} MB for a 4-minute song${NATIVE ? "." : ", stored in Telegram, not on your phone."}</div>
+  <h2>Download to Telegram</h2>
+  <div class="setCard">${segHTML("qDl", ["320", "160", "96"])}<div class="setNote">About ${cfg.qDl === "320" ? "10" : cfg.qDl === "160" ? "5" : "3"} MB for a 4-minute song, stored in Telegram, not on your phone.</div>
     <button class="setRow" data-act="${tgMe.linked ? "tgOpen" : "tgConnect"}"><span><b>Telegram</b><small>${tgMe.linked ? `Connected${tgMe.username ? " · @" + esc(tgMe.username) : ""} ✅` : "Not connected · tap to connect"}</small></span>${TGICON}</button></div>
   <h2>AutoMix</h2>
   <div class="setCard"><button class="setRow" data-act="automix"><span><b>AutoMix 🎚️</b><small>Gaane ek dusre me mix hote hain, Apple Music jaise. Kitna mix, Dhun har gaane ke hisaab se khud decide karta hai</small></span><i class="sw${cfg.automix !== false ? " on" : ""}"></i></button>${mixVolOK ? "" : `<div class="setNote">iPhone browser me AutoMix nahi chal sakta (Safari volume change nahi karne deta) — gaane normal tarike se badlenge.</div>`}<div class="setNote">Listen Together me AutoMix band rehta hai, taaki sabka gaana ek saath chale.</div></div>
   <h2>Equalizer</h2>
   <div class="setCard">
     <button class="setRow" data-act="eqToggle"><span><b>Equalizer</b><small>${eqOn ? eqPreset : "Off"}</small></span><i class="sw${eqOn ? " on" : ""}"></i></button>
-    <div class="setNote warn">⚠️ ${NATIVE ? "If music stops when the screen is off, turn the equalizer <b>off</b>." : "On iPhone, the equalizer can make music stop when you lock the screen or switch apps. Keep it <b>off</b> for background listening."}</div>
+    <div class="setNote warn">⚠️ On iPhone, the equalizer can make music stop when you lock the screen or switch apps. Keep it <b>off</b> for background listening.</div>
     <div class="pchips">${Object.keys(EQP).map(p => `<button class="pchip${eqOn && eqPreset === p ? " on" : ""}" data-act="preset" data-p="${esc(p)}">${esc(p)}</button>`).join("")}${eqPreset === "Custom" ? `<button class="pchip on">Custom</button>` : ""}</div>
     <canvas id="eqCanvas"></canvas>
     <div class="bands${eqOn ? "" : " off"}">${EQF.map((f, i) => `<div class="band"><span>${f >= 1000 ? f / 1000 + "k" : f}</span><input type="range" min="-12" max="12" step="1" value="${eqGains[i]}" data-band="${i}"><b id="bv${i}">${eqGains[i] > 0 ? "+" : ""}${eqGains[i]}</b></div>`).join("")}</div>
     <div class="btnRow" style="padding:6px 0 4px;margin:0"><button data-act="eqReset">Reset to Flat</button></div>
   </div>
   <div class="libLinks" style="margin-top:18px"><button data-open="downloads" class="tgLink">${TGICON}<span>Telegram Downloads <small class="sub">${n} songs</small></span></button><a class="dealRow" href="${esc(deals.join || DEALS_JOIN_DEFAULT)}" target="_blank" rel="noopener"><i class="dealEmoji">🛍️</i><span>Join Deals channel <small class="sub">Daily deals</small></span></a></div>
-  ${NATIVE ? `<div class="setCard" style="margin-top:18px"><button class="setRow" data-act="updCheck"><span><b>Check for updates</b><small>Dhun app v${esc(String((appVer && appVer.versionName) || "…"))}</small></span>${ICON.dl}</button></div>` : ""}${FOOTER()}<div class="verTag">v${esc(String((appVer && appVer.versionName) || "1.0.0"))}</div>`;
+  ${footHTML()}<div class="verTag">v1.0.10 · web</div>`;
   requestAnimationFrame(drawEq);
 }
 view.addEventListener("input", e => {
@@ -286,13 +275,10 @@ view.addEventListener("click", e => {
     if (a === "newPlaylist") return newPlaylist();
     if (a === "back") { subView = null; return rerender(); }
     if (a === "settings") return go("library", "settings");
-    if (a === "offAll") { const p = subView && getPlaylist(subView); if (p) offDownloadAll(p.tracks); return; }
-    if (a === "offClear") { if (confirm("Delete all songs downloaded on this phone?")) offClearAll(); return; }
     if (a === "dlAll") { const p = subView && getPlaylist(subView); if (p) downloadAll(p.tracks); return; }
     if (a === "tgConnect") return tgConnectSheet();
     if (a === "acctConnect") return tgConnectSheet("Sign in to save your likes, playlists & history to your own account, on any phone");
-    if (a === "updCheck") { toast("Checking for updates…"); updCheck(true); return; }
-    if (a === "syncNow") { tgRefresh(true); syncPull(true).then(() => toast(syncErr ? "Couldn't sync, check internet" : "Synced ✅")); acctUi(); return; }
+    if (a === "syncNow") { syncPull(true).then(() => toast(syncErr ? "Couldn't sync, check internet" : "Synced ✅")); acctUi(); return; }
     if (a === "tgOpen") { window.open(`https://t.me/${tgBot}`, "_blank"); return; }
     if (a === "tgOff") { if (confirm("Log out of your Dhun account on this phone? Your likes, playlists and Telegram songs stay saved in your account — connect again to get them back.")) tgDisconnect(); return; }
     if (a === "rmDl") return removeDl(act.dataset.id);
@@ -340,7 +326,6 @@ function openTrackSheet(t, ctx, idx) {
     ${t.src === "saavn" ? `<button data-s="album">Album dekho${t.album ? ": " + esc(t.album) : ""} ${typeof DISC_ICON === "string" ? DISC_ICON : ""}</button>` : ""}
     <button data-s="like">${isLiked(t.id) ? "Unlike" : "Love"} ${isLiked(t.id) ? ICON.heart : ICON.heartO}</button>
     <button data-s="addpl">Add to Playlist… ${ICON.pl}</button>
-    ${!NATIVE || isYT(t) ? "" : isOff(t.id) ? `<button data-s="unoff" class="danger">Remove from phone ${ICON.trash}</button>` : offJobs.has(t.id) ? `<button data-s="noop">Downloading to phone…<span data-offp="${esc(String(t.id))}">${offJobs.get(t.id) ? " " + offJobs.get(t.id) + "%" : ""}</span> ${ICON.dl}</button>` : `<button data-s="off">Download to phone (offline) ${ICON.dl}</button>`}
     ${isYT(t) ? "" : isDl(t.id) ? `<button data-s="undl" class="danger">Remove from Telegram ${ICON.trash}</button>` : dlJobs.has(t.id) ? `<button data-s="noop">Sending to Telegram… ${TGICON}</button>` : `<button data-s="dl">Download to Telegram ${TGICON}</button>`}
     <button data-s="share">Share Song ${ICON.share}</button>
     ${inPl ? `<button data-s="rm" class="danger">Remove from Playlist ${ICON.trash}</button>` : ""}
@@ -351,7 +336,7 @@ function openTrackSheet(t, ctx, idx) {
     lyr: () => { lyrToggle(true); },
     artist: () => { closeNP(); collOpenArtist(t.artist); },
     album: () => { closeNP(); collOpen("als:" + t.id); },
-    dl: () => download(t), undl: () => removeDl(t.id), noop: () => {}, off: () => offDownload(t), unoff: () => offRemove(t.id),
+    dl: () => download(t), undl: () => removeDl(t.id), noop: () => {},
     like: () => toggleLike(t),
     addpl: () => { setTimeout(() => openAddToPlaylist(t), 50); },
     share: () => { const url = isYT(t) || isLegacy(t) ? "https://music.youtube.com/watch?v=" + t.id : "https://www.jiosaavn.com/search/song/" + encodeURIComponent(t.title + " " + t.artist); if (navigator.share) navigator.share({ title: t.title, text: `${t.title} — ${t.artist}`, url }).catch(() => {}); else { navigator.clipboard && navigator.clipboard.writeText(url); toast("Link copied"); } },
@@ -395,7 +380,7 @@ const dlJobs = new Map(); let dlWait = [], dlActive = 0, dlBatch = null, tgPendi
 const blobUrls = new Map(), artUrls = new Map();
 const isDl = id => !!dlIdx[id];
 const mb = b => b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : (b / 1e6).toFixed(1) + " MB";
-const tgUrl = id => `${API_BASE}/api/tg/stream?c=${encodeURIComponent(tgCode)}&id=${encodeURIComponent(id)}`;
+const tgUrl = id => `/api/tg/stream?c=${encodeURIComponent(tgCode)}&id=${encodeURIComponent(id)}`;
 const TGICON = '<svg viewBox="0 0 24 24"><path d="M21.9 4.3l-3.2 15.1c-.2 1.1-.9 1.3-1.8.8l-4.9-3.6-2.4 2.3c-.3.3-.5.5-1 .5l.3-5 9.1-8.2c.4-.4-.1-.6-.6-.2L6.2 13l-4.8-1.5c-1-.3-1.1-1 .2-1.5L20.5 2.8c.9-.3 1.6.2 1.4 1.5z"/></svg>';
 async function post(path, body) { const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) }); let j = {}; try { j = await r.json(); } catch (e) {} j.status = r.status; return j; }
 function tgItem(x) { return { t: { id: x.id, sid: x.sid, src: "saavn", tg: true, title: x.title, artist: x.artist, album: x.album, dur: x.dur, thumb: x.thumb }, q: x.q, bytes: x.bytes, at: x.at }; }
@@ -404,7 +389,7 @@ async function tgRefresh(silent) {
   try {
     const me = await api("/api/tg/me?c=" + encodeURIComponent(tgCode)); tgBot = me.bot || tgBot;
     if (!me.known) { tgCode = ""; store.set("tgCode", ""); }
-    const was = tgMe.linked; tgMe = { linked: me.linked, username: me.username, name: me.name }; store.set("tgMe", tgMe);
+    const was = tgMe.linked; tgMe = { linked: me.linked, username: me.username, name: me.name, first: me.first || "", uid: me.uid || "" }; store.set("tgMe", tgMe);
     if (me.linked) { const l = await api("/api/tg/mine?c=" + encodeURIComponent(tgCode)); dlIdx = {}; (l.items || []).forEach(x => dlIdx[x.id] = tgItem(x)); saveDl(); syncPull(); }
     if (!silent || was !== me.linked) dlUi();
     return me.linked;
@@ -415,7 +400,7 @@ async function tgConnectSheet(why) {
   if (!tgCode) { try { const r = await post("/api/tg/new"); if (!r.code) throw 0; tgCode = r.code; tgBot = r.bot || tgBot; store.set("tgCode", tgCode); syncInit = false; store.set("syncInit", false); } catch (e) { return toast("Couldn't reach the server, try again"); } }
   const link = `https://t.me/${tgBot}?start=${tgCode}`;
   await new Promise(r => setTimeout(r, 60));
-  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgLogo">${TGICON}</div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
+  showSheet(`<div class="sgroup tgc"><div class="shead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=16" alt="Dhun"><span class="x">⇄</span><div class="tgLogo">${TGICON}</div></div><div><div class="t1">Connect Telegram</div><div class="sub">${esc(why || "Your own account: likes, playlists & history saved on any phone. Downloads go to your Telegram, not phone storage")}</div></div></div>
     <div class="tgSteps">1. Tap <b>Open Telegram</b><br>2. Tap <b>Start</b> in the bot chat<br>3. Come back here — your library syncs and downloads start on their own</div>
     <a class="tgBtn" href="${esc(link)}" target="_blank" rel="noopener">${TGICON}Open Telegram</a>
     <button data-s="check">I've tapped Start ✓</button></div>`, { check: async () => { const ok = await tgRefresh(); if (ok) tgLinked(); else setTimeout(() => tgConnectSheet("Not connected yet — open Telegram and tap Start"), 60); } });
@@ -487,150 +472,6 @@ async function tgDisconnect() {
   syncInit = false; syncDirty = {}; syncAt = 0; store.set("syncInit", false); store.set("syncDirty", syncDirty); store.set("syncAt", 0);
   dlUi(); syncLike(); toast("Logged out. Your library is safe in your account");
 }
-
-// ---------- phone downloads (Android app only): song + cover saved in the app's own storage, play with no internet ----------
-const FS = NATIVE ? window.Capacitor.Plugins.Filesystem : null;
-const saveOff = () => store.set("offList", offIdx);
-const offSrc = id => { const d = offIdx[id]; return d ? window.Capacitor.convertFileSrc(d.file) : ""; };
-const offArt = id => { const d = offIdx[id]; return d && d.art ? window.Capacitor.convertFileSrc(d.art) : ""; };
-function offTracks() { return Object.values(offIdx).sort((a, b) => b.at - a.at).map(x => x.t); }
-function offRefreshArt() { for (const id in offIdx) { const a = offArt(id); if (a) artUrls.set(id, a); } }
-function offInfoHTML() {
-  const n = Object.keys(offIdx).length, bytes = Object.values(offIdx).reduce((a, x) => a + (x.bytes || 0), 0);
-  return `<div class="setNote tgNote" style="margin:0 20px 12px">${n} song${n === 1 ? "" : "s"} · ${mb(bytes)} on this phone${offJobs.size ? ` · ${offJobs.size} downloading` : ""}<br>These play <b>without internet</b>, also in airplane mode, with the screen locked.</div>`;
-}
-function offAllHTML(tracks) {
-  if (!NATIVE) return "";
-  const can = tracks.filter(t => !isYT(t)); if (!can.length) return "";
-  const done = can.filter(t => isOff(t.id)).length, busy = can.filter(t => offJobs.has(t.id)).length;
-  const label = done === can.length ? `${ICON.dlDone}All on this phone` : busy ? `${ICON.dl}Downloading ${done}/${can.length}…` : `${ICON.dl}Download All to phone${done ? ` (${can.length - done} left)` : ""}`;
-  return `<div class="btnRow" style="margin-top:0"><button data-act="offAll" class="${done === can.length ? "done" : ""}">${label}</button></div>`;
-}
-function offDownload(t, quiet) {
-  if (!NATIVE || !t) return;
-  if (isYT(t)) { if (!quiet) toast("This one is from YouTube, it can't be downloaded"); return; }
-  if (isOff(t.id)) { if (!quiet) toast("Already on your phone ✓"); return; }
-  if (offJobs.has(t.id)) return;
-  if (!navigator.onLine) { if (!quiet) toast("You're offline"); return; }
-  offJobs.set(t.id, 0); offWait.push(slim(t)); pumpOff();
-  const tgToo = offAlsoTg(t);
-  if (!quiet) toast(tgToo === "nolink" ? `Downloading “${t.title}”… · Telegram connect karo to wahan bhi milega` : `Downloading “${t.title}”…${tgToo === "sent" ? " + Telegram pe bhi bhej rahe hain" : ""}`, tgToo === "nolink" ? 3500 : 2200);
-  dlUi();
-}
-// a phone download also goes to the user's Telegram chat with the bot (same as the website's Telegram download; cached in the storage group)
-function offAlsoTg(t) {
-  if (!t || isYT(t)) return "";
-  if (!tgMe.linked || !tgCode) return "nolink";
-  if (isDl(t.id) || dlJobs.has(t.id)) return "have";
-  dlJobs.set(t.id, { p: 0, t: slim(t) }); dlWait.push(t); pumpDl(); return "sent";
-}
-function offDownloadAll(list) {
-  const todo = list.filter(t => !isYT(t) && !isOff(t.id) && !offJobs.has(t.id));
-  if (!todo.length) return toast("All already on your phone ✓");
-  if (!navigator.onLine) return toast("You're offline");
-  offBatch = { n: todo.length, ok: 0, fail: 0 };
-  const tgTodo = tgMe.linked && tgCode ? todo.filter(t => !isDl(t.id) && !dlJobs.has(t.id)) : [];
-  if (tgTodo.length && !dlBatch) dlBatch = { n: tgTodo.length, ok: 0, fail: 0 };
-  todo.forEach(t => offDownload(t, true)); toast(`Downloading ${todo.length} song${todo.length > 1 ? "s" : ""}…${tgTodo.length ? " + Telegram pe bhi" : (!tgMe.linked ? " · Telegram connect karo to wahan bhi milenge" : "")}`, 3500);
-}
-function pumpOff() {
-  while (offActive < 2 && offWait.length) {
-    const t = offWait.shift(); offActive++;
-    doOff(t).then(lowQ => { if (offBatch) offBatch.ok++; else toast(lowQ ? `“${t.title}” downloaded ✅ (${lowQ} kbps, higher quality failed)` : `“${t.title}” downloaded ✅ plays offline`, lowQ ? 4000 : 2200); })
-      .catch(e => { if (offBatch) { offBatch.fail++; offBatch.why = (e && e.message) || ""; } else toast(e && e.message && e.message.length < 140 ? e.message : `Download failed: “${t.title}”`, 5000); })
-      .finally(() => {
-        offJobs.delete(t.id); offActive--;
-        if (offBatch && offBatch.ok + offBatch.fail >= offBatch.n) { toast(offBatch.fail ? `${offBatch.ok} downloaded ✅ · ${offBatch.fail} failed${offBatch.why ? " (" + offBatch.why.replace(/^Download failed: /, "") + ")" : ""}` : `${offBatch.ok} songs downloaded ✅ play offline`, offBatch.fail ? 5000 : 2200); offBatch = null; }
-        dlUi(); pumpOff();
-      });
-  }
-}
-// The plugin's downloadFile streams natively to disk (no base64 in JS) but does NOT create parent folders
-// (Filesystem 8.x ignores recursive there): make songs/ and covers/ first, or every download dies with ENOENT.
-let offDirsOk = false;
-async function offDirs() {
-  if (offDirsOk) return;
-  for (const d of ["songs", "covers"]) {
-    try { await FS.mkdir({ path: d, directory: "DATA", recursive: true }); }
-    catch (e) { try { await FS.stat({ path: d, directory: "DATA" }); } catch (e2) { throw new Error("mkdir " + d + ": " + ((e && e.message) || e)); } }
-  }
-  offDirsOk = true;
-}
-const offProg = new Map(); // url -> track id, for the native progress events
-if (NATIVE && FS && FS.addListener) {
-  try { FS.addListener("progress", p => {
-    const id = p && offProg.get(p.url); if (!id || !offJobs.has(id)) return;
-    const pct = p.contentLength > 0 ? Math.min(99, Math.floor(p.bytes * 100 / p.contentLength)) : 0;
-    if (pct !== offJobs.get(id)) { offJobs.set(id, pct); offProgUi(id, pct); }
-  }); } catch (e) {}
-}
-function offProgUi(id, pct) {
-  const t = queue[qi], b = $("#npDl"); if (b && t && t.id === id) b.dataset.p = pct ? pct + "%" : "…";
-  document.querySelectorAll(`[data-offp="${CSS.escape(String(id))}"]`).forEach(el => el.textContent = pct ? ` ${pct}%` : "");
-}
-function offReason(e) {
-  const m = String((e && (e.message || e.errorMessage)) || e || "");
-  if (/ENOSPC|No space left/i.test(m)) return "phone storage is full";
-  if (/UnknownHost|Unable to resolve|ENETUNREACH|ECONNREFUSED|ConnectException|failed to connect|Network is unreachable/i.test(m)) return "no internet connection";
-  if (/timed? ?out|SocketTimeout/i.test(m)) return "connection timed out";
-  if (/SSL|certificate|Handshake/i.test(m)) return "secure connection failed";
-  if (/https?:\/\/\S+/.test(m) && /FileNotFound|404|403|410/i.test(m)) return "song link expired (server said no)";
-  if (/ENOENT|No such file|mkdir|EACCES|Permission denied|read-only/i.test(m)) return "couldn't save to app storage";
-  if (/too small/i.test(m)) return "server sent an empty file";
-  return m ? m.replace(/^Error downloading file:\s*/i, "").replace(/\/data\/\S*\//g, "").slice(0, 60) : "unknown error";
-}
-async function offFetch(url, fp, id) {
-  offProg.set(url, id);
-  try {
-    await FS.downloadFile({ url, path: fp, directory: "DATA", recursive: true, progress: true, connectTimeout: 20000, readTimeout: 30000 });
-    const bytes = (await FS.stat({ path: fp, directory: "DATA" })).size || 0;
-    if (bytes <= 20000) throw new Error("file too small (" + bytes + " bytes)");
-    return bytes;
-  } catch (e) { FS.deleteFile({ path: fp, directory: "DATA" }).catch(() => {}); throw e; }
-  finally { offProg.delete(url); }
-}
-async function doOff(t) {
-  let sid = t.sid || (t.src === "saavn" ? t.id : resolved[t.id] && resolved[t.id].sid);
-  if (!sid) { await resolveTrack(t); sid = resolved[t.id] && resolved[t.id].sid; }
-  if (!sid) throw new Error(`“${t.title}” isn't on JioSaavn, can't download it`);
-  let d;
-  try { d = await api("/api/song?id=" + encodeURIComponent(sid)); } catch (e) { throw new Error("Download failed: couldn't reach the server"); }
-  const src = d.track && d.track.url; if (!src) throw new Error(`Couldn't get “${t.title}” from JioSaavn`);
-  // file names come from the song id only (titles can hold quotes, slashes, colons); the title lives in the index
-  const safe = String(t.id).replace(/[^\w-]/g, "_").slice(0, 80), fp = `songs/${safe}.mp4`, ap = `covers/${safe}.jpg`;
-  try { await offDirs(); } catch (e) { throw new Error("Download failed: " + offReason(e)); }
-  let q = cfg.qDl, bytes = 0, lastErr = null;
-  const tries = [...new Set([q, "160", "96"])];
-  outer: for (const tryQ of tries) {
-    const url = withQ(src, tryQ);
-    for (let attempt = 0; attempt < 2; attempt++) { // each quality: one try + one retry, then fall back to lower quality
-      try { bytes = await offFetch(url, fp, t.id); q = kbpsOf(url) || tryQ; break outer; }
-      catch (e) {
-        lastErr = e; console.warn("[dhun] phone download failed", tryQ, attempt, e && e.message);
-        if (/ENOSPC|No space left/i.test(String(e && e.message))) break outer;
-        if (/ENOENT|No such file/i.test(String(e && e.message))) { offDirsOk = false; try { await offDirs(); } catch (e2) {} }
-        if (offJobs.has(t.id)) { offJobs.set(t.id, 0); offProgUi(t.id, 0); }
-      }
-    }
-  }
-  if (!bytes) throw new Error("Download failed: " + offReason(lastErr));
-  let art = "";
-  const thumb = (t.thumb || (d.track && d.track.thumb) || "").replace(/(\d+)x\1(?=\.jpg)/, "500x500");
-  if (/^https?:/.test(thumb)) { try { await FS.downloadFile({ url: thumb, path: ap, directory: "DATA", recursive: true, connectTimeout: 15000, readTimeout: 20000 }); art = (await FS.getUri({ path: ap, directory: "DATA" })).uri; } catch (e) {} }
-  const file = (await FS.getUri({ path: fp, directory: "DATA" })).uri;
-  const tt = slim(t); delete tt.tg; tt.sid = sid;
-  offIdx[t.id] = { t: tt, fp, ap: art ? ap : "", file, art, bytes, q, at: Date.now() }; saveOff();
-  if (art) artUrls.set(t.id, offArt(t.id));
-  return String(q) !== String(kbpsOf(withQ(src, cfg.qDl)) || cfg.qDl) ? q : 0; // lower quality than asked
-}
-async function offRemove(id, quiet) {
-  const d = offIdx[id]; if (!d) return; delete offIdx[id]; saveOff(); artUrls.delete(id);
-  try { await FS.deleteFile({ path: d.fp, directory: "DATA" }); } catch (e) {}
-  if (d.ap) { try { await FS.deleteFile({ path: d.ap, directory: "DATA" }); } catch (e) {} }
-  if (!quiet) { toast("Removed from phone"); dlUi(); }
-}
-async function offClearAll() { for (const id of Object.keys(offIdx)) await offRemove(id, true); toast("All phone downloads deleted"); dlUi(); }
-if (NATIVE) offRefreshArt();
 // ---------- account sync: likes, playlists, recently played live in the user's server account once Telegram is connected ----------
 const SYNC_KEYS = ["liked", "playlists", "recent"];
 let syncDirty = store.get("syncDirty", {}), syncInit = store.get("syncInit", false), syncAt = store.get("syncAt", 0), syncRev = store.get("syncRev", -1);
@@ -681,16 +522,17 @@ async function syncPull(force) {
 }
 function acctUi() { if (curTab === "library" && (!subView || subView === "settings")) { const y = view.scrollTop; rerender(); view.scrollTop = y; } }
 const ago = ms => { const s = (Date.now() - ms) / 1000; return s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + " min ago" : s < 86400 ? Math.floor(s / 3600) + " h ago" : Math.floor(s / 86400) + " d ago"; };
+// a Telegram name with no letters or digits (e.g. ".. ..") reads as nothing; show "Telegram user" instead
+const realName = s => { s = String(s || "").trim(); return /[\p{L}\p{N}]/u.test(s) ? s : ""; };
+function tgNames(m) { m = m || {}; const first = realName(m.first) || realName(String(m.name || "").split(/\s+/)[0]) || realName(m.name) || "Telegram user"; return { first }; }
 function acctHTML(compact) {
   if (!tgMe.linked) return compact
     ? `<div class="acct off"><div class="acctTxt"><b>Sign in with Telegram</b><small>Save your likes & playlists to your own account, get them back on any phone</small></div><button data-act="acctConnect" class="tgB">${TGICON}Connect</button></div>`
-    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgLogo">${TGICON}</div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
-  const nm = String(tgMe.name || "").trim(), realNm = /[\p{L}\p{N}]/u.test(nm) ? nm : ""; // ".. .." style names → fallback
-  const who = realNm ? esc(realNm) : tgMe.username ? "@" + esc(tgMe.username) : "Telegram user";
-  const whoSub = realNm && tgMe.username ? "@" + esc(tgMe.username) + " · " : "";
+    : `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=16" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>Not signed in</b><small>Connect Telegram to get your own account: likes, playlists, recently played and downloads are saved to it and come back on any phone.</small></div></div><div class="btnRow" style="padding:12px 0 2px;margin:0"><button data-act="acctConnect" class="tgB">${TGICON}Connect Telegram</button></div><div class="setNote">Until you connect, everything stays only on this phone.</div></div>`;
+  const nm = tgNames(tgMe), who = esc(nm.first), handle = tgMe.username ? "@" + esc(tgMe.username) : (tgMe.uid ? "ID " + esc(tgMe.uid) : "");
   const st = syncBusy ? "Syncing…" : Object.keys(syncDirty).length ? (syncErr === "offline" ? "Offline, will sync later" : "Saving…") : syncAt ? `Synced ${ago(syncAt)}` : "Syncing…";
-  if (compact) return `<button class="acct on" data-act="settings"><div class="acctTxt"><b>☁️ ${who}${realNm && tgMe.username ? ` <span class="sub">@${esc(tgMe.username)}</span>` : ""}</b><small>${st} · ${liked.length} liked · ${playlists.length} playlist${playlists.length === 1 ? "" : "s"}</small></div></button>`;
-  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgLogo">${TGICON}</div><div><b>${who}</b><small>${whoSub}Signed in with Telegram ✅</small></div></div>
+  if (compact) return `<button class="acct on" data-act="settings"><div class="acctTxt"><b>☁️ ${who}${handle ? ` <span class="acctAt">${handle}</span>` : ""}</b><small>${st} · ${liked.length} liked · ${playlists.length} playlist${playlists.length === 1 ? "" : "s"}</small></div></button>`;
+  return `<div class="setCard acctCard"><div class="acctHead"><div class="tgPair"><img class="dm" src="/dhun-mark.webp?v=16" alt="Dhun"><div class="tgLogo">${TGICON}</div></div><div><b>${who}</b><small>${handle ? handle + " · " : ""}Signed in with Telegram ✅</small></div></div>
     <div class="setNote">☁️ ${st}<br>Your likes (${liked.length}), playlists (${playlists.length}), recently played and Telegram downloads (${Object.keys(dlIdx).length}) are saved to your account. Connect Telegram on any other phone to get them back.</div>
     <div class="btnRow" style="padding:10px 0 2px;margin:0"><button data-act="syncNow">Sync now</button><button data-act="tgOff" style="color:#ff453a">Log out</button></div></div>`;
 }
@@ -704,7 +546,6 @@ function dlUi(progress) {
 function syncDlBtn() {
   const b = $("#npDl"); if (!b) return; const t = queue[qi];
   const j = t && dlJobs.get(t.id);
-  if (NATIVE) { b.innerHTML = t && isOff(t.id) ? ICON.dlDone : ICON.dl; b.classList.toggle("on", !!(t && isOff(t.id))); b.dataset.p = t && offJobs.has(t.id) ? (offJobs.get(t.id) ? offJobs.get(t.id) + "%" : "…") : ""; return; }
   b.innerHTML = t && isDl(t.id) ? ICON.dlDone : ICON.dl; b.classList.toggle("on", !!(t && isDl(t.id)));
   b.dataset.p = j ? "…" : "";
 }
@@ -813,7 +654,7 @@ async function startRadio(t) {
   try { const d = await api(radioURL(t) + "&long=1"); const more = freshSongs(d.items, [t, queue[0]]); queue = [queue[0], ...more.map(slim)]; qi = 0; saveQ(); renderQueue(); prepNext(); } catch (e) {}
 }
 // Make sure the NEXT song already has a playable URL, so 'ended' can switch instantly (iOS freezes timers when locked)
-function prepNext() { const n = queue[qi + 1]; if (!n || isOff(n.id)) return; if (n.tg && isDl(n.id)) return; if (!urlOf(n) && !isYT(n) && navigator.onLine) resolveTrack(n); }
+function prepNext() { const n = queue[qi + 1]; if (!n) return; if (n.tg && isDl(n.id)) return; if (!urlOf(n) && !isYT(n) && navigator.onLine) resolveTrack(n); }
 function status(msg) { $("#npStatus").textContent = msg || ""; }
 
 function loadCurrent(autoplay, startAt = 0) {
@@ -821,12 +662,7 @@ function loadCurrent(autoplay, startAt = 0) {
   mixAbort();
   const my = ++loadToken; userPaused = !autoplay;
   clearTimeout(stallTimer); stopYT(); mode = "audio";
-  if (isOff(t.id)) { // saved on this phone: plays with no internet
-    if (eqOn && !eqRouted) eqRoute();
-    updateMeta(t); addRecent(t); renderQueue(); highlightRows(); syncDlBtn(); if (navigator.onLine) maybeAutoplayFill();
-    return playUrl(t, offSrc(t.id), my, autoplay, startAt, 0);
-  }
-  if (!navigator.onLine) { updateMeta(t); renderQueue(); highlightRows(); try { audio.pause(); } catch (e) {} userPaused = true; syncPlay(); status(NATIVE ? "You're offline — this song isn't downloaded. Library → Downloaded plays without internet" : "You're offline — Dhun needs internet"); return; }
+  if (!navigator.onLine) { updateMeta(t); renderQueue(); highlightRows(); try { audio.pause(); } catch (e) {} userPaused = true; syncPlay(); status("You're offline — Dhun needs internet"); return; }
   if (eqOn && !eqRouted) eqRoute();
   updateMeta(t); addRecent(t);
   renderQueue(); highlightRows(); maybeAutoplayFill(); syncDlBtn();
@@ -869,7 +705,7 @@ async function ytFallback(t, my, startAt, autoplay) {
   if (srcs.length && !/forceyt=1/.test(location.search)) {
     audio.onerror = () => { if (my === loadToken) playYT({ ...t, id: ytid }, my, startAt, autoplay); };
     audio.onplaying = () => { if (my === loadToken) { clearTimeout(stallTimer); status(""); prepNext(); } };
-    audio.src = eqRouted ? API_BASE + "/api/p?u=" + encodeURIComponent(srcs[0].url) : srcs[0].url; syncQ();
+    audio.src = eqRouted ? "/api/p?u=" + encodeURIComponent(srcs[0].url) : srcs[0].url; syncQ();
     if (autoplay) { audio.play().catch(() => {}); stallTimer = setTimeout(() => { if (my === loadToken && audio.readyState < 3 && !userPaused) playYT({ ...t, id: ytid }, my, startAt, autoplay); }, 9000); }
     return;
   }
@@ -1022,10 +858,6 @@ setInterval(() => { if (!document.hidden && !audio.paused) mixMaybe(); }, 500);
 function next(auto) {
   if (!queue.length) return;
   if (auto && repeat === 2) { P.seek(0); return P.play(); }
-  if (NATIVE && !navigator.onLine) { // offline: jump to the next song saved on the phone
-    let j = queue.findIndex((x, k) => k > qi && isOff(x.id)); if (j < 0 && (repeat === 1 || !auto)) j = queue.findIndex(x => isOff(x.id));
-    if (j >= 0) { qi = j; saveQ(); return loadCurrent(true); }
-  }
   let j = qi + 1;
   if (auto) { const k = songKey(queue[qi]); while (j < queue.length && songKey(queue[j]) === k) j++; } // skip copies of the song that just ended
   if (j < queue.length) qi = j;
@@ -1044,7 +876,7 @@ async function maybeAutoplayFill() {
 // ---------- UI sync ----------
 const np = $("#np");
 function updateMeta(t) {
-  const art = (isOff(t.id) && offArt(t.id)) || (!navigator.onLine && artUrls.get(t.id)) || t.thumb || ytThumb(t.id);
+  const art = (!navigator.onLine && artUrls.get(t.id)) || t.thumb || ytThumb(t.id);
   $("#mini").classList.remove("hidden");
   $("#miniArt").src = small(art); $("#miniTitle").textContent = t.title; $("#miniArtist").textContent = t.artist;
   $("#npArt").src = art; $("#npArt").onerror = function () { this.onerror = null; this.src = ytThumb(t.id); };
@@ -1126,7 +958,6 @@ wireAudio(audio);
 // quality badge on Now Playing = the quick Wi-Fi / Data saver switch
 function syncQ(u) {
   const b = $("#npQ"); if (!b) return; u = u || audio.getAttribute("src") || "";
-  if (/_capacitor_file_/.test(u)) { const d = queue[qi] && offIdx[queue[qi].id]; b.textContent = "On phone" + (d && d.q ? " · " + d.q + " kbps" : ""); b.className = "qpill dl"; return; }
   if (/\/api\/tg\/stream/.test(u)) { const d = queue[qi] && dlIdx[queue[qi].id]; b.textContent = "Telegram" + (d && d.q ? " · " + d.q + " kbps" : ""); b.className = "qpill dl"; return; }
   if (mode === "yt" || (u && !/saavncdn|^blob:/.test(u))) { b.textContent = "YouTube"; b.className = "qpill"; return; }
   if (/^blob:/.test(u)) { const d = queue[qi] && dlIdx[queue[qi].id]; b.textContent = "Downloaded" + (d && d.q ? " · " + d.q + " kbps" : ""); b.className = "qpill dl"; return; }
@@ -1135,17 +966,11 @@ function syncQ(u) {
 }
 function applyQualityNow() {
   const t = queue[qi]; syncQ();
-  if (t && mode === "audio" && !isDl(t.id) && !isOff(t.id) && urlOf(t) && audio.getAttribute("src") && kbpsOf(audio.getAttribute("src")) !== kbpsOf(withQ(urlOf(t), curQ()))) { const was = !audio.paused, at = audio.currentTime; loadCurrent(was, at); }
+  if (t && mode === "audio" && !isDl(t.id) && urlOf(t) && audio.getAttribute("src") && kbpsOf(audio.getAttribute("src")) !== kbpsOf(withQ(urlOf(t), curQ()))) { const was = !audio.paused, at = audio.currentTime; loadCurrent(was, at); }
 }
 function setSaver(on) { cfg.saver = on; saveCfg(); applyQualityNow(); toast(on ? `Data saver on · ${cfg.qCell} kbps` : `Wi‑Fi quality · ${cfg.qWifi} kbps`); if (curTab === "library" && subView === "settings") rerender(); }
 $("#npQ").onclick = () => setSaver(!cfg.saver);
-$("#npDl").onclick = () => { const t = queue[qi]; if (!t) return;
-  if (NATIVE) { // in the app this button saves the song on the phone (plays offline)
-    if (isOff(t.id)) return showSheet(`<div class="sgroup"><div class="shead"><div class="t1">${esc(t.title)}</div><div class="sub">On this phone ✓ · plays without internet</div></div>${isYT(t) || isDl(t.id) ? "" : `<button data-s="tg">Also send to Telegram ${TGICON}</button>`}<button data-s="rm" class="danger">Remove from phone ${ICON.trash}</button></div>`, { rm: () => offRemove(t.id), tg: () => download(t) });
-    if (offJobs.has(t.id)) return toast(offJobs.get(t.id) ? `Downloading… ${offJobs.get(t.id)}%` : "Downloading…");
-    return offDownload(t);
-  }
-  if (isDl(t.id)) showSheet(`<div class="sgroup"><div class="shead"><div class="t1">${esc(t.title)}</div><div class="sub">In your Telegram ✓</div></div><a class="tgBtn" href="https://t.me/${esc(tgBot)}" target="_blank" rel="noopener">${TGICON}Open in Telegram</a><button data-s="rm" class="danger">Remove from Telegram ${ICON.trash}</button></div>`, { rm: () => removeDl(t.id) }); else download(t); };
+$("#npDl").onclick = () => { const t = queue[qi]; if (!t) return; if (isDl(t.id)) showSheet(`<div class="sgroup"><div class="shead"><div class="t1">${esc(t.title)}</div><div class="sub">In your Telegram ✓</div></div><a class="tgBtn" href="https://t.me/${esc(tgBot)}" target="_blank" rel="noopener">${TGICON}Open in Telegram</a><button data-s="rm" class="danger">Remove from Telegram ${ICON.trash}</button></div>`, { rm: () => removeDl(t.id) }); else download(t); };
 $("#npDl").innerHTML = ICON.dl;
 const _c = conn(); if (_c && _c.addEventListener) _c.addEventListener("change", () => syncQ());
 window.addEventListener("online", () => { rerender(); syncQ(); });
@@ -1156,7 +981,7 @@ if ("mediaSession" in navigator) {
   const ms = navigator.mediaSession;
   const h = (a, f) => { try { ms.setActionHandler(a, f); } catch (e) {} };
   h("play", () => P.play()); h("pause", () => P.pause());
-  h("previoustrack", () => prev()); h("nexttrack", () => next(false));
+  h("previoustrack", prev); h("nexttrack", () => next(false));
   h("seekto", d => P.seek(d.seekTime));
   h("seekbackward", null); h("seekforward", null); // keep next/prev buttons on the lock screen
 }
@@ -1165,121 +990,10 @@ if ("mediaSession" in navigator) {
 if (queue[qi]) { updateMeta(queue[qi]); syncPlay(); renderQueue(); }
 syncModes();
 window.addEventListener("keydown", e => { if (e.code === "Space" && e.target.tagName !== "INPUT") { e.preventDefault(); toggle(); } });
-if (!NATIVE && "serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+(function(){const s=document.getElementById("splash");if(!s)return;const hide=()=>{s.classList.add("out");setTimeout(()=>s.remove(),400)};setTimeout(hide,650);})();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 window.__m = { P, queue: () => queue, get audio() { return audio; }, doSearch, playList, lists, get mode() { return mode; }, cfg, setSaver, setEq, setPreset, download, dl: () => dlIdx, dlJobs, removeDl,
   eq() { const o = { on: eqOn, routed: eqRouted, ctx: actx && actx.state, gains: eqNodes.map(n => +n.gain.value.toFixed(2)), types: eqNodes.map(n => n.type), pre: preGain && +preGain.gain.value.toFixed(3) }; if (analyser) { const d = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(d); let sq = 0; for (const x of d) sq += x * x; o.rms = +Math.sqrt(sq / d.length).toFixed(4); } return o; } };
-if (NATIVE) {
-  const CapApp = window.Capacitor.Plugins.App;
-  if (CapApp) CapApp.addListener("backButton", () => {
-    if (typeof lsIn !== "undefined" && lsIn) return lsExit(); // v1.0.8: back leaves lyrics select mode first
-    if (!sheet.classList.contains("hidden")) return closeSheet();
-    if (np.classList.contains("open")) return closeNP();
-    if (window.__pod && window.__pod.back()) return;
-    if (document.getElementById("v23voice")) { document.getElementById("v23voice").remove(); return; }
-    if (curTab === "library" && subView) { subView = null; return rerender(); }
-    if (curTab !== "home") return go("home");
-    CapApp.minimizeApp(); // keep the music playing instead of closing the app
-  });
-  if (!navigator.onLine && Object.keys(offIdx).length) { curTab = "library"; subView = "offline"; tabs.forEach(b => b.classList.toggle("on", b.dataset.tab === "library")); }
-}
-// ---------- in-app updates (Android app only): the Dhun site says which APK is newest; download it here and hand it to the installer ----------
-const UPD = NATIVE ? (window.Capacitor.Plugins.DhunUpdater || null) : null;
-let appVer = store.get("appVer", null), updState = null; // updState: { info, phase: "ask"|"dl"|"perm"|"err", pct, path, err }
-const updNewer = (remote, localCode) => { const r = parseInt(remote && remote.versionCode, 10), l = parseInt(localCode, 10); return Number.isFinite(r) && Number.isFinite(l) && r > l; };
-const updUrlOk = u => /^https:\/\//i.test(String(u || ""));
-async function updVersion() { if (!UPD) return null; try { appVer = await UPD.getVersion(); store.set("appVer", appVer); } catch (e) {} return appVer; }
-let updLaterCode = 0, updBusy = false; // "Baad me" hides the popup for this app session only
-function updShow(info, manual) {
-  if (updState) return;
-  if (!manual && !info.force && updLaterCode === Number(info.versionCode)) return;
-  updState = { info, phase: "ask", pct: 0 }; updRender();
-}
-async function updCheck(manual) {
-  if (!UPD || updBusy) return;
-  if (!manual && updState) return; // the popup is already up
-  updBusy = true;
-  try {
-    const v = await updVersion(); if (!v) { if (manual) toast("Couldn't read the app version"); return; }
-    const last = store.get("updLast", 0);
-    if (!manual && Date.now() - last < 2 * 60e3) { // asked the server under 2 min ago: reuse that answer
-      const f = store.get("updFound", null); if (f && updUrlOk(f.apkUrl) && updNewer(f, v.versionCode)) updShow(f, false); return;
-    }
-    if (!navigator.onLine) { if (manual) toast("You're offline"); return; }
-    let info;
-    try { info = await api("/api/app-version?c=" + v.versionCode + "&_=" + Date.now()); } catch (e) { if (manual) toast("Couldn't check for updates, try later"); return; }
-    store.set("updLast", Date.now()); // only a check that got an answer counts
-    if (!info || !updUrlOk(info.apkUrl) || !updNewer(info, v.versionCode)) { store.set("updFound", null); if (manual) toast(`You're on the latest version ✅ (v${v.versionName})`); return; }
-    store.set("updFound", info); updShow(info, manual);
-  } finally { updBusy = false; }
-}
-function updRender() {
-  let el = $("#updDlg");
-  if (!updState) { if (el) el.remove(); return; }
-  if (!el) { el = document.createElement("div"); el.id = "updDlg"; document.body.appendChild(el); el.addEventListener("click", updClick); }
-  const { info, phase, pct, err } = updState, force = !!info.force;
-  const notes = info.notes ? `<div class="updNotes">${esc(String(info.notes)).replace(/\n/g, "<br>")}</div>` : "";
-  let body = "";
-  if (phase === "ask") body = `${notes}<div class="updBtns">${force ? "" : `<button data-u="later">Baad me</button>`}<button data-u="go" class="pri">Update now</button></div>`;
-  else if (phase === "dl") body = `<div class="updBar"><i style="width:${pct || 2}%"></i></div><div class="updSub">Downloading… ${pct ? pct + "%" : ""}</div>`;
-  else if (phase === "perm") body = `<div class="updSub">Update install karne ke liye Dhun ko permission chahiye: Settings me <b>“Allow from this source”</b> ON karo, phir wapas aao. Install apne aap shuru ho jayega.</div><div class="updBtns">${force ? "" : `<button data-u="later">Baad me</button>`}<button data-u="perm" class="pri">Settings kholo</button></div>`;
-  else if (phase === "inst") body = `<div class="updSub">Installer khul gaya, <b>Update</b> dabao ✅<br>Aapke songs aur playlists safe rahenge.</div><div class="updBtns"><button data-u="retry">Installer dobara kholo</button><button data-u="later">Close</button></div>`;
-  else if (phase === "err") body = `<div class="updSub err">Update failed: ${esc(err || "unknown error")}</div><div class="updBtns">${force ? "" : `<button data-u="later">Baad me</button>`}<button data-u="go" class="pri">Try again</button></div>`;
-  el.innerHTML = `<div class="updCard"><img src="/dhun-mark.png" alt="" width="34"><h3>Naya update available 🎉</h3><div class="updVer">v${esc(String(info.versionName || info.versionCode))}${appVer ? ` <span>· abhi v${esc(String(appVer.versionName))}</span>` : ""}</div>${body}</div>`;
-}
-function updClick(e) {
-  const b = e.target.closest("[data-u]"); if (!b) return;
-  const u = b.dataset.u;
-  if (u === "later") { if (updState && updState.info) updLaterCode = Number(updState.info.versionCode) || 0; updState = null; updRender(); }
-  else if (u === "go") updDownload();
-  else if (u === "perm") UPD.openInstallSettings().catch(err => { updState.phase = "err"; updState.err = (err && err.message) || "couldn't open Settings"; updRender(); });
-  else if (u === "retry") updInstall();
-}
-let updDlUrl = "";
-async function updDownload() {
-  if (!updState || updState.phase === "dl") return;
-  updState.phase = "dl"; updState.pct = 0; updRender();
-  const path = "dhun-update.apk";
-  updDlUrl = updState.info.apkUrl + (updState.info.apkUrl.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(updState.info.versionCode);
-  let lastErr = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      await FS.deleteFile({ path, directory: "CACHE" }).catch(() => {});
-      await FS.downloadFile({ url: updDlUrl, path, directory: "CACHE", progress: true, connectTimeout: 20000, readTimeout: 30000 });
-      const st = await FS.stat({ path, directory: "CACHE" });
-      if (!st.size || st.size < 500000) throw new Error("file too small (" + (st.size || 0) + " bytes)");
-      if (updState.info.size && Math.abs(st.size - updState.info.size) > 0) throw new Error("download incomplete");
-      updState.path = (await FS.getUri({ path, directory: "CACHE" })).uri; lastErr = null; break;
-    } catch (e) { lastErr = e; }
-  }
-  updDlUrl = "";
-  if (lastErr) { updState.phase = "err"; updState.err = offReason(lastErr).replace("song link expired (server said no)", "update file not found on the server"); updRender(); return; }
-  updInstall();
-}
-async function updInstall() {
-  if (!updState || !updState.path) return;
-  try {
-    const c = await UPD.canInstall();
-    if (!c.allowed) { updState.phase = "perm"; updRender(); return; }
-    await UPD.install({ path: updState.path });
-    updState.phase = "inst"; updRender();
-  } catch (e) {
-    const code = e && e.code, msg = (e && e.message) || "";
-    if (code === "NOT_ALLOWED" || /unknown apps/i.test(msg)) { updState.phase = "perm"; updRender(); return; }
-    if (code === "NOT_NEWER") { updState = null; updRender(); toast("Already up to date ✅"); return; }
-    updState.phase = "err"; updState.err = msg.replace(/^install: /, "") || "couldn't open the installer"; updRender();
-  }
-}
-if (UPD) {
-  try { FS.addListener("progress", p => { if (!updDlUrl || !p || p.url !== updDlUrl || !updState || updState.phase !== "dl") return; const pct = p.contentLength > 0 ? Math.min(99, Math.floor(p.bytes * 100 / p.contentLength)) : 0; if (pct !== updState.pct) { updState.pct = pct; updRender(); } }); } catch (e) {}
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) return;
-    if (updState && updState.phase === "perm") { UPD.canInstall().then(c => { if (c.allowed) updInstall(); }).catch(() => {}); return; }
-    updCheck(false);
-  });
-  updVersion().then(() => { if (curTab === "library" && subView === "settings") rerender(); });
-  setTimeout(() => updCheck(false), 3000);
-}
-window.__upd = { updNewer, updUrlOk, updCheck, get state() { return updState; } };
 rerender(); syncPlay();
 // ---- Deals UI ----
 function dealsHidden() { return false; } // deals can no longer be closed (her 4:08 PM ask)
@@ -1288,30 +1002,30 @@ function dealHref(d) { const u = String((d && d.url) || ""); return /^https:\/\/
 function dealImg(d, cls) { return d && d.img && /^https:\/\//.test(d.img) ? `<img class="${cls}" src="${esc(d.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('i'),{className:'${cls} ph',textContent:'🛍️'}))">` : `<i class="${cls} ph">🛍️</i>`; }
 function dealCur() { const it = deals.items || []; return it.length ? it[dealIdx % it.length] : null; }
 function dealsHomeHTML() {
-  if (dealsHidden() || !navigator.onLine || !(deals.items || []).length) return "";
+  if (dealsHidden() || !(deals.items || []).length) return "";
   const d = dealCur();
   return `<div id="dealCard" class="dealCard"><a class="dcLink" href="${esc(dealHref(d))}" target="_blank" rel="noopener">${dealImg(d, "dcImg")}<span class="dcBody"><b>🔥 Deals</b><span class="dcT">${esc(d.text)}</span></span></a></div>`;
 }
 function dealsJoinHTML() {
-  const join = deals.join || DEALS_JOIN_DEFAULT, d = navigator.onLine ? dealCur() : null;
-  return `<div class="dealsJoin"><div class="djHead"><i class="djIcon">🛍️</i><span><b>Deals channel</b><small>Best shopping deals, daily · on Telegram</small></span></div>${d ? `<div class="djList"><a id="djOne" class="djOne" href="${esc(dealHref(d))}" target="_blank" rel="noopener">${dealImg(d, "djImg")}<span class="djT">${esc(d.text)}</span></a></div>` : ""}<a class="djBtn" href="${esc(join)}" target="_blank" rel="noopener">${TGICON}<span>Join Deals channel 🛍️</span></a></div>`;
+  const join = deals.join || DEALS_JOIN_DEFAULT, d = dealCur();
+  return `<div class="dealsJoin"><div class="djHead"><i class="djIcon">🛍️</i><span><b>Deals channel</b><small>Best shopping deals, daily · on Telegram</small></span></div>${d ? `<div class="djList djOne"><a id="djOne" href="${esc(dealHref(d))}" target="_blank" rel="noopener">${dealImg(d, "djImg")}<span class="djT">${esc(d.text)}</span></a></div>` : ""}<a class="djBtn" href="${esc(join)}" target="_blank" rel="noopener">${TGICON}<span>Join Deals channel 🛍️</span></a></div>`;
 }
 function dealsTick() {
   const el = document.getElementById("dealTick"); if (!el) return;
-  const d = dealCur(), show = !!d && !dealsHidden() && navigator.onLine;
+  const d = dealCur(), show = !!d && !dealsHidden();
   el.classList.toggle("hidden", !show); document.body.classList.toggle("hasTick", show);
   if (!show) return;
   const a = el.querySelector("a"); a.href = dealHref(d); el.querySelector(".dtT").textContent = d.text;
 }
 function dealsRotate() {
-  if (document.hidden || !navigator.onLine || (deals.items || []).length < 2) return;
-  if (dealsHidden() && !document.getElementById("djOne")) return;
+  const one = document.getElementById("djOne");
+  if (document.hidden || (deals.items || []).length < 2 || (dealsHidden() && !one)) return;
   dealIdx = (dealIdx + 1) % deals.items.length;
-  const d = dealCur(), card = document.getElementById("dealCard"), tick = document.getElementById("dealTick"), one = document.getElementById("djOne");
+  const d = dealCur(), card = document.getElementById("dealCard"), tick = document.getElementById("dealTick");
   [card, tick, one].forEach(x => x && x.classList.add("fade"));
   setTimeout(() => {
     if (card && card.isConnected) { const l = card.querySelector(".dcLink"); l.href = dealHref(d); const old = l.querySelector(".dcImg"); if (old) old.outerHTML = dealImg(d, "dcImg"); card.querySelector(".dcT").textContent = d.text; card.classList.remove("fade"); }
-    if (one && one.isConnected) { one.href = dealHref(d); const old = one.querySelector(".djImg"); if (old) old.outerHTML = dealImg(d, "djImg"); one.querySelector(".djT").textContent = d.text; one.classList.remove("fade"); }
+    if (one && one.isConnected) { one.href = dealHref(d); const oi = one.querySelector(".djImg"); if (oi) oi.outerHTML = dealImg(d, "djImg"); one.querySelector(".djT").textContent = d.text; one.classList.remove("fade"); }
     dealsTick(); if (tick) tick.classList.remove("fade");
   }, 220);
 }
@@ -1321,9 +1035,9 @@ function dealsHide() {
   dealsTick();
 }
 function dealsLoad() {
-  if (dealLoading || !navigator.onLine || Date.now() - (deals.at || 0) < 20 * 60e3) return;
+  if (dealLoading || Date.now() - (deals.at || 0) < 20 * 60e3) return;
   dealLoading = true;
-  fetch(API_BASE + "/api/deals").then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => {
+  api("/api/deals").then(j => {
     if (!j || !Array.isArray(j.items)) return;
     const had = (deals.items || []).length;
     deals = { items: j.items.filter(d => d && d.text).slice(0, 10), join: /^https:\/\/t\.me\/\w+$/.test(j.join || "") ? j.join : DEALS_JOIN_DEFAULT, at: Date.now() };
@@ -1334,8 +1048,6 @@ function dealsLoad() {
   }).catch(() => {}).finally(() => dealLoading = false);
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) dealsLoad(); });
-window.addEventListener("online", () => { dealsTick(); dealsLoad(); });
-window.addEventListener("offline", () => { dealsTick(); });
 dealsTick(); dealsLoad();
 dealTimer = setInterval(dealsRotate, 6000);
 setInterval(dealsLoad, 5 * 60e3);
@@ -1540,7 +1252,7 @@ function renderRecap() {
   <div class="rcBox"><h3>Top Songs</h3>${r.topSongs.map((s, i) => `<div class="rcRow" data-rcplay="${i}"><span class="rcN">${i + 1}</span><img src="${esc(small(s.thumb) || "/icon-192.png")}" onerror="this.onerror=null;this.src='/icon-192.png'" alt=""><span class="rcT"><b>${esc(s.title)}</b><small>${esc(s.artist)}</small></span><span class="rcC">${s.plays}×</span></div>`).join("")}</div>
   <div class="rcBox"><h3>Top Artists</h3>${r.topArtists.map((a, i) => `<div class="rcRow"><span class="rcN">${i + 1}</span><span class="rcT"><b>${esc(a.name)}</b></span><span class="rcC">${a.plays} plays</span></div>`).join("")}</div>
   <div class="rcGrid"><div class="rcBox"><small>Top language</small><b>${esc(cap1(r.lang) || "—")}</b></div><div class="rcBox"><small>Most-played day</small><b>${esc(bestDayLabel(r.bestDay))}</b>${r.bestMin ? `<small>${r.bestMin} min</small>` : ""}</div></div>
-  ${NATIVE ? "" : `<div class="btnRow" style="margin-top:16px"><button data-act="recapShare">${ICON.share}Share my Recap</button></div>`}`;
+  <div class="btnRow" style="margin-top:16px"><button data-act="recapShare">${ICON.share}Share my Recap</button></div>`;
   view.innerHTML = h;
   bindList("recapTop", r.topSongs.map(s => ({ ...s, src: s.src || "saavn" })));
 }
@@ -1578,6 +1290,7 @@ document.addEventListener("click", e => {
   if (a === "back" && (svBackHome && (String(subView || "").startsWith("sv:") || subView === "recap"))) { e.preventDefault(); e.stopPropagation(); svBackHome = false; go("home"); return; }
 }, true);
 
+
 // ---------- Resume where you left off (app closed / swiped away / reloaded) ----------
 // The resume point is {id, pos} of the song in the player; it is never written before a song is actually loaded,
 // so a fresh start can no longer overwrite it with 0:00.
@@ -1607,7 +1320,6 @@ showResumePoint();
 document.addEventListener("visibilitychange", () => { if (document.hidden) savePos(); });
 window.addEventListener("pagehide", savePos); window.addEventListener("beforeunload", savePos);
 document.addEventListener("pause", savePos); // Android: app sent to background
-
 // ---------- Listen Together (Jam): shared room on the server; every device streams the song itself and follows the room's clock ----------
 const JAM_BASE = IMP_BASE, JAM_SITE = "https://dhun.sites.tab.bot/";
 const JAM_ICON = '<svg viewBox="0 0 24 24"><path d="M12 3a8 8 0 00-8 8v5.5A2.5 2.5 0 006.5 19H8v-7H6v-1a6 6 0 0112 0v1h-2v7h1.5a2.5 2.5 0 002.5-2.5V11a8 8 0 00-8-8z"/><circle cx="12" cy="21" r="1.2"/><circle cx="8.2" cy="21" r="1.2"/><circle cx="15.8" cy="21" r="1.2"/></svg>';
@@ -1672,7 +1384,7 @@ function jamCheck(force) { // keep this device on the room's clock: play/pause +
     if (mode === "yt") { const dd = P.time() - exp; if (Math.abs(dd) > 1.5 && now - jamSeekAt > 4000) { jamSeekAt = now; rawSeek(exp); } return; }
     if (audio.readyState < 3 || now - jamLoadAt < 1200) return; // still buffering
     const drift = audio.currentTime - exp;
-    if (Math.abs(drift) > 1.5) { if (now - jamSeekAt > 3500) { jamSeekAt = now; audio.playbackRate = 1; rawSeek(exp + 0.25); } return; }
+    if (Math.abs(drift) > 1.5) { if (now - jamSeekAt > 3500) { jamSeekAt = now; audio.playbackRate = 1; rawSeek(exp + 0.1); } return; }
     // small drift: nudge the speed a little until it is back in step (pitch is preserved)
     const r = Math.abs(drift) < 0.12 ? 1 : (drift > 0 ? 0.95 : 1.05);
     if (Math.abs(drift) < 0.35 && audio.playbackRate === 1) return;
@@ -1881,6 +1593,7 @@ $("#queueList").addEventListener("click", e => {
   jamAct({ t: "qplay", i, id: t.id });
 }, true);
 $("#npShuffle").addEventListener("click", e => { if (!jamOn()) return; e.stopImmediatePropagation(); jamPredict(s => { const q = s.queue || []; for (let k = q.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [q[k], q[j]] = [q[j], q[k]]; } }); jamAct({ t: "shuffle" }); toast("Sabki queue shuffle ho gayi"); }, true);
+if ("mediaSession" in navigator) { try { navigator.mediaSession.setActionHandler("previoustrack", () => prev()); navigator.mediaSession.setActionHandler("nexttrack", () => next(false)); } catch (e) {} }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && jamOn()) { jamOffs = jamOffs.slice(-4); jamPoll(); setTimeout(() => jamCheck(true), 400); } });
 window.addEventListener("online", () => { if (jamOn()) jamPoll(); });
 // ----- UI -----
@@ -2013,9 +1726,6 @@ document.addEventListener("click", e => { if (e.target.closest("[data-act=jamCha
 })();
 window.__mix = { info: id => { const b = mixInfo.get(id); return b ? b.v : undefined; }, get on() { return mixOn(); } };
 window.__jam = { get jam() { return jam; }, get off() { return jamOff; }, exp: () => jam && jamExp(jam.st), check: jamCheck, get chat() { return jamMsgs; }, get unread() { return jamUnread; } };
-
-// storage: an update APK left in the app cache after installing is removed (it is ~5 MB and never needed again)
-if (NATIVE && FS) setTimeout(() => { try { if (!updState) FS.deleteFile({ path: "dhun-update.apk", directory: "CACHE" }).catch(() => {}); } catch (e) {} }, 20000);
 // ================= v21: Artist / Album / Charts / Mood pages ("Sab chalao"), Song radio, Sleep timer, Lyrics =================
 // ---------- collection pages: one view for an artist, an album, a chart or a mood mix: big "Sab chalao" (play all) + Shuffle ----------
 const colls = {}; // key -> {id,name,image,items,...} | {loading} | {error}
@@ -2311,6 +2021,8 @@ function greetData() {
   try { if (tgMe && tgMe.linked) name = realName(tgMe.first) || realName(String(tgMe.name || "").split(/\s+/)[0]); } catch (e) {}
   name = name.split(/\s+/)[0].slice(0, 18);
   const subs = GREET_SUB[k];
+  const dwG = (() => { try { const n = Date.now(); return n >= Date.parse("2026-11-07T00:00:00+05:30") && n < Date.parse("2026-11-09T00:00:00+05:30"); } catch (e) { return false; } })();
+  if (dwG) { const t2 = "Happy Diwali 🪔"; return { k, title: name ? t2.replace(/ (\S+)$/, `, ${name} $1`) : t2, sub: "Shubh Deepavali! Diwali ke gaane sunein? 🎆" }; }
   return { k, title: name ? title.replace(/ (\S+)$/, `, ${name} $1`) : title, sub: subs[greetSeq % subs.length] };
 }
 function greetHTML() { const g = greetData(); return `<div class="greet ${g.k}" data-greet><b>${esc(g.title)}</b><small>${esc(g.sub)}</small></div>`; }
@@ -5633,4 +5345,35 @@ function jamAutoHTML() { return `<button class="setRow jamAutoRow" data-s="jamAu
 function qlToggle() { QL.on = !QL.on; store.set("jamAuto", QL.on); qlReset(); applyQualityNow(); qlRowRefresh(); }
 window.__ql = { get QL() { return QL; }, tick: qlTick, ladder: QL_LADDER, room: () => jamAutoQ() };
 /* ===== end v1.0.10 Auto quality ===== */
+/* ===== v1.0.12 Diwali 2026 (7-8 Nov IST): greeting + Diwali Hits row; self-removes after the window ===== */
+const dwOn = () => { const n = Date.now(); return n >= Date.parse("2026-11-07T00:00:00+05:30") && n < Date.parse("2026-11-09T00:00:00+05:30"); };
+let dwData = store.get("dwHits", null), dwBusy = false;
+function dwLoad() {
+  if (!dwOn() || dwBusy || !navigator.onLine || (dwData && Date.now() - dwData.at < 6 * 3600e3 && dwData.items.length)) return;
+  dwBusy = true;
+  Promise.all(["diwali hits", "happy diwali songs", "deepavali party songs hindi"].map(q => api("/api/search?q=" + encodeURIComponent(q)).catch(() => null))).then(rs => {
+    const seen = new Set(), items = [];
+    for (let i = 0; i < 15; i++) for (const d of rs) { const t = d && d.items && d.items[i]; if (!t || !t.id) continue; const k = String(t.title || "").toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9]/g, "") + "|" + String(t.artist || "").toLowerCase().split(",")[0].replace(/[^a-z0-9]/g, ""); if (seen.has(k) || items.length >= 15) continue; seen.add(k); items.push(t); }
+    if (!items.length) return;
+    dwData = { at: Date.now(), items }; store.set("dwHits", dwData);
+    if (v32Home()) dwPaint();
+  }).catch(() => {}).finally(() => { dwBusy = false; });
+}
+function dwPaint() {
+  if (!v32Home()) return; v32Rm(".dwH, .dwRow");
+  if (!dwOn()) return;
+  const items = (dwData && dwData.items) || []; if (!items.length) return;
+  bindList("dwHits", items);
+  const h = `<h2 class="dwH">🪔 Diwali Hits</h2><div class="car dwRow">${items.map((t, i) => `<button class="tile" data-ctx="dwHits" data-i="${i}" data-id="${esc(t.id)}"><span class="nwArt"><img loading="lazy" src="${esc(small(t.thumb) || ytThumb(t.id))}" onerror="this.onerror=null;this.src='/icon-192.png'"></span><div class="t1">${esc(t.title)}</div><div class="t2">${esc(t.artist || "")}</div></button>`).join("")}</div>`;
+  const tmp = document.createElement("div"); tmp.innerHTML = h;
+  const a = view.querySelector("[data-greet]") || view.querySelector("h1.hrow");
+  if (a) a.after(...tmp.childNodes); else view.append(...tmp.childNodes);
+}
+{ const raw = renderHome; renderHome = function () {
+  const r = raw.apply(this, arguments);
+  try { if (v32Home() && dwOn()) { dwPaint(); dwLoad(); } } catch (e) { console.warn("diwali home", e); }
+  return r;
+}; }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && dwOn()) dwLoad(); });
+/* ===== end Diwali ===== */
 })();
