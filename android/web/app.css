@@ -1221,3 +1221,6 @@ body:has(#mini:not(.hidden)) #tabs{bottom:var(--bgBar)}
 #lyrPanel::-webkit-scrollbar{display:none}
 }
 /* ===== end v1.0.9 big screens A ===== */
+
+/* v1.0.18 tap: no 300ms/double-tap delay on controls */
+html,body,button,a,input,select,label,[role=button]{touch-action:manipulation}
