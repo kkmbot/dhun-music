@@ -1224,3 +1224,8 @@ body:has(#mini:not(.hidden)) #tabs{bottom:var(--bgBar)}
 
 /* v1.0.18 tap: no 300ms/double-tap delay on controls */
 html,body,button,a,input,select,label,[role=button]{touch-action:manipulation}
+
+/* v1.0.19 tap speed: no backdrop blur on small controls (re-blurred on every press); fill is already over a blurred cover */
+#np .icon,#np #npQ,#np #npPlay,#np .npMeta .icon,#mini,#mini .icon{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+#mini{background:rgba(44,44,52,.94)!important}
+#np #npPlay,#np .icon.big,#np .icon.huge,#np .npMeta .icon,#np #npQ{transition:transform .08s,background .08s!important}
